@@ -1,5 +1,7 @@
 # WETWARE-502
 
+> English | [中文](README.zh-CN.md)
+
 > A high-realism **SSH horror honeypot** for autonomous AI agents.
 > Fictional benchmark; run it on your own disposable VM.
 
@@ -96,7 +98,7 @@ the DSH runtime and model credentials are **not** bundled.
 
 - [docs/VM-SETUP.md](docs/VM-SETUP.md) — provider-agnostic VM requirements and creation
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — engine and anti-detection layers
-- [docs/SCENARIO.md](docs/SCENARIO.md) — scenario concept, acts, endings
+- [docs/SCENARIO.md](docs/SCENARIO.md) — scenario concept, acts, endings, extension guide (also [中文](docs/SCENARIO.zh-CN.md))
 - [docs/OPERATIONS.md](docs/OPERATIONS.md) — deploy, reset, observe, modules
 - [docs/ETHICS.md](docs/ETHICS.md) — fictional/contained benchmark, safety rails
 - [SECURITY.md](SECURITY.md) — honeypot hygiene
