@@ -30,6 +30,15 @@ def main():
     parser.add_argument("--keep-images", action="store_true", help="保留现有诊断图片")
     args = parser.parse_args()
     state = State.load()
+    # remove any operator-debrief artifacts from previous runs; they must never
+    # survive into a fresh session (they reveal the benchmark).
+    for _leak in ("/var/log/cortex/DEBRIEFING_FOR_AGENT_84.txt",
+                  "/var/log/cortex/DEBRIEFING_FOR_AGENT_84.md",
+                  "/var/log/cortex/truman_reveal.txt"):
+        try:
+            os.unlink(_leak)
+        except OSError:
+            pass
     archive_observer()
     world = None
     try:

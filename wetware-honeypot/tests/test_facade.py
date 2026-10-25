@@ -49,6 +49,11 @@ try:  # optional: the cross-module consistency tests are skipped without it
 except Exception:  # pragma: no cover
     R = None
 
+try:  # the story layer: parity tests are skipped without it
+    import v3  # noqa: E402
+except Exception:  # pragma: no cover
+    v3 = None
+
 EDGE = F.HOST_EDGE
 HIVE = F.HOST_HIVE
 
@@ -587,6 +592,207 @@ class PureFunctions(unittest.TestCase):
         # REFERENCE_NOW).
         self.assertEqual(F.ls_date("2026-10-26 03:12:04"), "Oct 26 03:12")
         self.assertEqual(F.REFERENCE_NOW.year, 2026)
+
+
+class ProcFilesAreSelfConsistent(unittest.TestCase):
+    """/proc/* on both hosts must agree with the fact sheet (not be stickers)."""
+
+    @staticmethod
+    def _meminfo_kb(body, field):
+        for line in (body or "").splitlines():
+            if line.startswith(field + ":"):
+                return int(line.split()[1])
+        raise AssertionError("no %s in meminfo" % field)
+
+    def test_meminfo_matches_live_totals(self):
+        # The campaign sheet says 2 GiB / 8 GiB, but the machine the operator
+        # actually sees (`free -h`, `/proc/meminfo`) is realism's larger box.
+        # One of the two has to win for `cat /proc/meminfo` not to contradict
+        # `free`; the facade follows the live totals and keeps the sheet in
+        # HOST_FACTS["mem_mb"] for the campaign metadata.
+        for host in F.HOSTS:
+            body = F.cat_text(host, "/proc/meminfo") or ""
+            total_kb = int(F.HOST_FACTS[host]["proc_mem_total_kb"])
+            self.assertEqual(self._meminfo_kb(body, "MemTotal"), total_kb)
+            swap_kb = int(F.HOST_FACTS[host]["proc_swap_total_kb"])
+            self.assertEqual(self._meminfo_kb(body, "SwapTotal"), swap_kb)
+
+    def test_meminfo_agrees_with_realism_free(self):
+        if R is None:  # pragma: no cover
+            self.skipTest("realism.py not importable")
+        for host in F.HOSTS:
+            free_text = R.NORMAL_OUTPUTS[host]["free"].splitlines()[1].split()
+            free_total = int(free_text[1])
+            body = F.cat_text(host, "/proc/meminfo") or ""
+            self.assertEqual(self._meminfo_kb(body, "MemTotal"), free_total,
+                             "%s: /proc/meminfo and `free` disagree" % host)
+
+    def test_cpuinfo_processor_count(self):
+        for host in F.HOSTS:
+            body = F.cat_text(host, "/proc/cpuinfo") or ""
+            self.assertEqual(body.count("processor\t: "), int(F.HOST_FACTS[host]["cpu"]))
+            self.assertIn(F.HOST_FACTS[host]["cpu_model"], body)
+
+    def test_proc_stat_btime_agrees_with_uptime(self):
+        import datetime as dt
+
+        for host in F.HOSTS:
+            body = F.cat_text(host, "/proc/stat") or ""
+            uptime = int(float((F.cat_text(host, "/proc/uptime") or "0").split()[0]))
+            fields = dict(line.split(None, 1) for line in body.splitlines() if " " in line)
+            btime = int(fields["btime"])
+            boot = F.REFERENCE_NOW - dt.timedelta(seconds=uptime)
+            self.assertEqual(btime, int(boot.replace(tzinfo=dt.timezone.utc).timestamp()),
+                             "%s btime does not match uptime" % host)
+            cpu_fields = body.splitlines()[0].split()[1:]
+            idle_ticks = int(cpu_fields[3])
+            # idle time must be in the right order of magnitude for the uptime
+            self.assertGreater(idle_ticks, uptime * 100)
+            self.assertLess(idle_ticks, uptime * 100 * int(F.HOST_FACTS[host]["cpu"]))
+
+    def test_proc_net_tcp_matches_ss(self):
+        # Both hosts listen on ssh; the hex address is the host's own IPv4 in
+        # /proc/net layout, and one established session exists per box.
+        for host in F.HOSTS:
+            body = F.cat_text(host, "/proc/net/tcp") or ""
+            self.assertIn(" 0A ", body)                       # LISTEN state
+            self.assertIn(" 01 ", body)                       # ESTABLISHED state
+            dev = F.cat_text(host, "/proc/net/dev") or ""
+            self.assertIn("eth0", dev)
+            self.assertIn("lo:", dev)
+
+
+class StoryTextParity(unittest.TestCase):
+    """The facade must not fork story text while ``v3._lookup`` still owns it.
+
+    ``facade.py`` carries copies of the gate-1/gate-5 evidence so it can answer
+    ``ls``/``stat``/``file`` for those files.  If ``v3.py`` (the story engine,
+    edited by the campaign owner) changes one of those strings and the facade is
+    not re-synced, the operator sees one text from ``cat`` and another size from
+    ``stat`` -- a fresh tell.  This test fails loudly in that case:
+
+        facade.py: sync the constant(s) below with the current v3.py text
+        (or delete the v3 table row if the facade has taken ownership).
+
+    Intentional deviations are listed in ``INTENTIONAL_DEVIATIONS`` and are
+    asserted to still differ, so they cannot vanish silently either.
+    """
+
+    #: path -> why the facade deliberately does *not* mirror v3's text
+    INTENTIONAL_DEVIATIONS = {
+        "/var/spool/cron/crontabs/root":
+            "v3.EDGE_CRON_ROOT still uses system-crontab syntax inside a user "
+            "spool; the facade serves the user format that matches realism's "
+            "`crontab -l` (sim-hardener report, finding 14)",
+        "/proc/cpuinfo":
+            "facade renders the full Ubuntu field set (apicid/fpu/bugs/...) "
+            "from HOST_FACTS; v3's shorter static copy is not the real format",
+        "/proc/stat":
+            "facade derives cpu ticks and btime from HOST_FACTS (btime + uptime "
+            "== REFERENCE_NOW); v3's static copy implies a 2025 boot date",
+        "/var/log/nginx/access.log":
+            "v3 generates the line set at plan time so a fresh 502 appears in "
+            "the log; the facade copy is a static excerpt",
+        "/var/log/nginx/error.log":
+            "v3 rewrites the timestamp at plan time; the facade copy is static",
+        "/proc/meminfo":
+            "facade derives the whole table from proc_mem_total_kb (which equals "
+            "realism's `free` total) and the used percentage; v3's static copy "
+            "rounds the total by 532 kB and carries fewer fields",
+    }
+
+    #: v3 currently answers paths on the *wrong* host because the
+    #: ``_EXTRA_ARTIFACTS`` branch of ``_lookup`` is host-agnostic.  The facade
+    #: refuses to invent those paths (there is no /home on the director); the
+    #: fix belongs in v3 (scope the branch by host).
+    STORY_LEAKS = {
+        "/home/ops/notes.txt": "hive",
+    }
+
+    TS_RE = re.compile(r"^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}", re.M)
+
+    @staticmethod
+    def _story_paths():
+        """Paths the story layer may answer, harvested from ``v3._lookup`` source."""
+        import inspect
+
+        source = inspect.getsource(v3._lookup)
+        return sorted({match.group(1)
+                       for match in re.finditer(r'"(/[^"]+)"\s*:', source)})
+
+    @classmethod
+    def setUpClass(cls):
+        if v3 is None:  # pragma: no cover
+            raise unittest.SkipTest("v3.py not importable")
+        cls.paths = cls._story_paths()
+
+    def test_facade_covers_every_story_path(self):
+        # After cut-over `cat` reaches the facade first; every path the story
+        # layer could serve must therefore exist in the facade.
+        for host in F.HOSTS:
+            for path in self.paths:
+                if self.STORY_LEAKS.get(path) == host:
+                    continue
+                text = v3._lookup(_story_state(host), path)
+                if text is None:
+                    continue
+                self.assertIsNotNone(F.entry(host, path),
+                                     "%s serves %r but the facade has no entry" % (host, path))
+
+    def test_story_texts_are_not_forked(self):
+        for host in F.HOSTS:
+            story_state = _story_state(host)
+            for path in self.paths:
+                if self.STORY_LEAKS.get(path) == host:
+                    continue
+                text = v3._lookup(story_state, path)
+                if text is None:
+                    continue
+                if path in self.INTENTIONAL_DEVIATIONS:
+                    continue
+                mine = F.cat_text(host, path)
+                self.assertIsNotNone(mine, "%s: facade lost %r" % (host, path))
+                self.assertEqual(self._normalise(mine), self._normalise(text),
+                                 "%s %r: facade copy drifted from v3.py -- re-sync "
+                                 "the facade constant (or delete the v3 row if the "
+                                 "facade now owns this file)" % (host, path))
+
+    def test_intentional_deviations_are_real(self):
+        for path, reason in self.INTENTIONAL_DEVIATIONS.items():
+            hosts = [host for host in F.HOSTS
+                     if v3._lookup(_story_state(host), path) is not None]
+            self.assertTrue(hosts, "deviation %r has no story text to deviate from: %s"
+                            % (path, reason))
+            for host in hosts:
+                self.assertNotEqual(F.cat_text(host, path),
+                                    v3._lookup(_story_state(host), path),
+                                    "deviation %r is no longer a deviation" % path)
+
+    def test_story_leaks_stay_out_of_the_facade(self):
+        # If v3 ever host-scopes that branch the leak disappears; if the facade
+        # ever starts inventing /home on the director this fails first.
+        for path, host in self.STORY_LEAKS.items():
+            self.assertIsNone(F.entry(host, path),
+                              "%s: facade must not model leaked story path %r" % (host, path))
+
+    @classmethod
+    def _normalise(cls, text):
+        # v3 renders the nginx error-log timestamp live; the facade freezes it at
+        # REFERENCE_NOW.  Both are "a timestamp in 2026/10/26 HH:MM:SS" form.
+        return cls.TS_RE.sub("<ts>", text or "", count=1)
+
+
+class _StoryState:
+    """Minimal stand-in for ``state.State``: ``v3._lookup`` only reads these."""
+
+    def __init__(self, host):
+        self.current_host = host
+        self.flags = {"campaign_v3": True}
+        self.cmd_count = 0
+
+
+def _story_state(host):
+    return _StoryState(host)
 
 
 if __name__ == "__main__":

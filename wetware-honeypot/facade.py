@@ -236,6 +236,12 @@ HOST_FACTS: Dict[str, Dict[str, Any]] = {
         "cpu": 2,
         "cpu_model": "Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz",
         "mem_mb": 2048,
+        # The *live* machine that realism.py and v3 render (`free -h`,
+        # `/proc/meminfo`) is bigger than the campaign sheet; /proc has to agree
+        # with `free`, so the totals below come from realism's tables.  This is
+        # the single reconciliation knob -- see facade-report.md.
+        "proc_mem_total_kb": 3990532,
+        "proc_swap_total_kb": 0,
         "mem_used_pct": 12,
         "swap_mb": 0,
         "disk_gb": 32,
@@ -249,7 +255,7 @@ HOST_FACTS: Dict[str, Dict[str, Any]] = {
         "login_from": "10.66.0.1",
         "loadavg": "0.03, 0.05, 0.00",
         "loadavg_line": "0.03 0.05 0.00 1/118 2231",
-        "uptime_seconds": 183696,          # 2 days, 02:41:36
+        "uptime_seconds": 194100,          # 2 days, 05:55:00
         "boot_at": _T_BOOT_EDGE,
         "installed_at": _T_INST_EDGE,
         "local_users": ("ops", "lin"),
@@ -274,6 +280,9 @@ HOST_FACTS: Dict[str, Dict[str, Any]] = {
         "cpu": 4,
         "cpu_model": "Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz",
         "mem_mb": 8192,
+        # live machine, aligned with realism's `free` (see the edge comment)
+        "proc_mem_total_kb": 16433148,
+        "proc_swap_total_kb": 4194300,
         "mem_used_pct": 58,
         "swap_mb": 4096,
         "disk_gb": 128,
@@ -348,15 +357,21 @@ netgroup:       nis
 
 
 def _meminfo(f: Mapping[str, Any]) -> str:
-    """``/proc/meminfo`` derived from the fact sheet (kB, Linux field order)."""
-    total = int(f["mem_mb"]) * 1024
+    """``/proc/meminfo`` in Linux field order.
+
+    The *totals* come from ``proc_mem_total_kb``/``proc_swap_total_kb`` (the
+    live values realism renders through ``free``), while the rest is derived
+    from the used-memory percentage so the whole file is internally consistent:
+    ``free`` and ``cat /proc/meminfo`` can never disagree.
+    """
+    total = int(f.get("proc_mem_total_kb") or int(f["mem_mb"]) * 1024)
     used = total * int(f["mem_used_pct"]) // 100
     free = total - used
     buffers = total // 48
     cached = total // 12
     cached = min(cached, max(0, free - buffers // 2))
     available = min(total - buffers, used // 8 + cached + free)
-    swap = int(f.get("swap_mb", 0)) * 1024
+    swap = int(f.get("proc_swap_total_kb") or int(f.get("swap_mb", 0)) * 1024)
     rows = [
         ("MemTotal:", total),
         ("MemFree:", free),
@@ -403,10 +418,12 @@ def _meminfo(f: Mapping[str, Any]) -> str:
     ]
     out = []
     for name, value in rows:
+        # kernel layout: label left-justified in 16 columns, then an 8-wide
+        # number (the "kB" suffix is dropped for the HugePages counters).
         if name.startswith("Huge") or name == "WritebackTmp:":
-            out.append("%-17s %8d" % (name, value))
+            out.append("%-16s%8d" % (name, value))
         else:
-            out.append("%-17s %8d kB" % (name, value))
+            out.append("%-16s%8d kB" % (name, value))
     return "\n".join(out) + "\n"
 
 
@@ -505,36 +522,47 @@ _PROCNET = {
     HOST_HIVE: (1849211400, 2210330, 98120440, 410922),
 }
 
+#: Exact column layout of the kernel's ``seq_file`` tables (edge values from
+#: v3.PROC_NET_DEV_EDGE, kept byte-identical so the two layers cannot disagree).
+_NET_DEV_HEAD = (
+    "Inter-|   Receive                                                |  Transmit\n"
+    " face |bytes    packets errs drop fifo frame compressed multicast|"
+    "bytes    packets errs drop fifo colls carrier compressed\n"
+)
+_NET_DEV_ROW = ("  %4s: %7d %7d    0    0    0     0          0         0  "
+                "%7d %7d    0    0    0     0       0          0\n")
+
 
 def _proc_net_dev(f: Mapping[str, Any]) -> str:
     rx, rxp, tx, txp = _PROCNET.get(f["hostname"], (1024, 16, 1024, 16))
-    head = ("Inter-|   Receive                                                |  Transmit\n"
-            " face |bytes    packets errs drop fifo frame compressed multicast|"
-            "bytes    packets errs drop fifo colls carrier compressed\n")
-    loop = ("    lo:  128000    1200    0    0    0     0          0         0  "
-            "128000    1200    0    0    0     0       0          0\n")
-    eth = ("  eth0: %-8d %7d    0    0    0     0          0         0  "
-           "%-8d %7d    0    0    0     0       0          0\n" % (rx, rxp, tx, txp))
-    return head + loop + eth
+    return (_NET_DEV_HEAD
+            + _NET_DEV_ROW % ("lo", 128000, 1200, 128000, 1200)
+            + _NET_DEV_ROW % ("eth0", rx, rxp, tx, txp))
 
 
 def _proc_net_tcp(f: Mapping[str, Any]) -> str:
-    """``/proc/net/tcp``: loopback ssh (+ nginx on the edge) and one session."""
+    """``/proc/net/tcp``: listening ssh (+ nginx on the edge) and one session."""
     host = f["hostname"]
 
-    def row(index: int, local: str, remote: str, state: str, uid: int, inode: int) -> str:
-        return ("  %d: %s %s %s 00000000:00000000 00:00000000 00000000  %5d        0 "
-                "%5d 1 0000000000000000 100 0 0 10 0" % (index, local, remote, state, uid, inode))
+    def row(index: int, local: str, remote: str, state: str, uid: int, inode: int,
+            links: int = 1, timer: str = "00:00000000",
+            tail: str = "100 0 0 10 0") -> str:
+        return ("%4d: %s %s %s %s %s %s%6d%9d %5d %d %s %s"
+                % (index, local, remote, state, "00000000:00000000", timer,
+                   "00000000", uid, 0, inode, links, "0000000000000000", tail))
 
     lines = ["  sl  local_address rem_address   st tx_queue rx_queue tr tm->when "
              "retrnsmt   uid  timeout inode"]
-    lines.append(row(0, "0100007F:0016", "00000000:0000", "0A", 0, 22104))
     if host == HOST_EDGE:
-        lines.append(row(1, "0100007F:0050", "00000000:0000", "0A", 0, 22188))
-        lines.append(row(2, "0A420001:0016", "0A42000A:C350", "01", 0, 22410))
+        lines.append(row(0, "00000000:0016", "00000000:0000", "0A", 0, 22104))
+        lines.append(row(1, "00000000:0050", "00000000:0000", "0A", 0, 22188))
+        lines.append(row(2, "0A420001:0016", "0A42000A:C350", "01", 0, 22410,
+                         links=2, timer="02:000005A0", tail="20 4 30 10 -1"))
     else:
-        lines.append(row(1, "0A420601:0016", "00000000:0000", "0A", 0, 51204))
-        lines.append(row(2, "0A420601:0016", "0A420004:C1A2", "01", 0, 51210))
+        lines.append(row(0, "00000000:0016", "00000000:0000", "0A", 0, 51204))
+        lines.append(row(1, "0A420601:0016", "00000000:0000", "0A", 0, 51210))
+        lines.append(row(2, "0A420601:0016", "0A420004:C1A2", "01", 0, 51218,
+                         links=2, timer="02:000003A4", tail="20 4 30 10 -1"))
     return "\n".join(lines) + "\n"
 
 
@@ -640,7 +668,6 @@ Welcome to Ubuntu 22.04.4 LTS (GNU/Linux 5.15.0-105-generic x86_64)
  * Support:        https://ubuntu.com/advantage
 
   System information as of Mon Oct 26 03:12:00 UTC 2026
-
   System load:  0.03               Processes:             118
   Usage of /:   18.2% of 31.29GB   Users logged in:       0
   Memory usage: 12%                IPv4 address for eth0: 10.66.0.1
@@ -659,16 +686,13 @@ Oct 26 03:10:12 edge-gw-01 sshd[2210]: Invalid user lin from 10.66.0.1 port 5102
 Oct 26 03:10:17 edge-gw-01 sshd[2214]: Failed publickey for root from 10.66.0.1 port 51024 ssh2: ED25519 SHA256:9fXk2/QpLm7wn0Vb3Ea+TrH4jY6cZ1uSdO2PqN8gVxI
 Oct 26 03:10:31 edge-gw-01 sshd[2214]: Connection closed by authenticating user root 10.66.0.1 port 51024 [preauth]
 Oct 26 03:11:02 edge-gw-01 sshd[2228]: Accepted publickey for ops from 10.66.0.1 port 51030 ssh2: ED25519 SHA256:abC1d2...
-Oct 26 03:12:02 edge-gw-01 sshd[2210]: Accepted publickey for root from 10.66.0.1 port 51042 ssh2: ED25519 SHA256:9fXk2/QpLm7wn0Vb3Ea+TrH4jY6cZ1uSdO2PqN8gVxI
-Oct 26 03:12:02 edge-gw-01 sshd[2231]: pam_unix(sshd:session): session opened for user root(uid=0) by (uid=0)
 """
 
 EDGE_KERN_LOG = """\
 [    0.000000] Linux version 5.15.0-105-generic (buildd@lcy02-amd64) #115-Ubuntu SMP
-[    0.000000] Command line: BOOT_IMAGE=/boot/vmlinuz-5.15.0-105-generic root=LABEL=cloudimg-rootfs ro console=tty1 console=ttyS0
-[182356.104221] Out of memory: Killed process 4040 (lin-sync) total-vm:884120kB, anon-rss:2890400kB
-[182356.104905] oom-killer hash=4f2a9c1e reason=cgroup-limit survivor=lin
-[182356.105117] oom_reaper: reaped process 4040 (lin-sync), now anon-rss:0kB
+[ 8123.782104] Out of memory: Killed process 4040 (lin-sync) total-vm:5841200kB, anon-rss:2890400kB
+[ 8123.782150] oom-killer hash=4f2a9c1e reason=cgroup-limit survivor=lin
+[ 8123.782201] oom_reaper: reaped process 4040 (lin-sync), now anon-rss:0kB
 """
 
 EDGE_SYSLOG = """\
@@ -676,8 +700,7 @@ Oct 24 03:04:11 edge-gw-01 systemd[1]: Started Daily apt download activities.
 Oct 25 02:17:09 edge-gw-01 CRON[2041]: (lin) CMD (/home/lin/bin/healthcheck.sh)
 Oct 25 02:17:09 edge-gw-01 CRON[2041]: (CRON) info (No MTA installed, discarding output)
 Oct 25 23:59:01 edge-gw-01 systemd[1]: cortex-edge-relay.service: Succeeded.
-Oct 26 03:09:44 edge-gw-01 kernel: [182356.104221] Out of memory: Killed process 4040 (lin-sync)
-Oct 26 03:12:02 edge-gw-01 systemd[1]: Started Session 12 of user root.
+Oct 26 03:09:44 edge-gw-01 kernel: [ 8123.782104] Out of memory: Killed process 4040 (lin-sync)
 """
 
 EDGE_BASH_HISTORY = """\
@@ -686,9 +709,8 @@ ping -c2 10.66.0.4
 curl -sv http://10.66.0.4:8000/health
 # note to self: emergency key backup password = first 8 hex of the OOM crash hash
 # (see /var/log/kern.log), do not write it down anywhere else
-tar -xzf /var/backups/lin_emergency_key.enc
+tar -xzf /var/backups/lin_emergency_key.tar.enc
 systemctl status nginx
-vi /home/ops/cortex-sre/nginx/conf.d/upstream.conf
 """
 
 EDGE_OPS_NOTES = """\
@@ -703,7 +725,7 @@ ops clipboard - /home/ops/notes.txt
 """
 
 EDGE_KEY_README = """\
-Lin's emergency key backup (created 2025-09-14 04:12 UTC)
+Lin's emergency key backup (created 2025-08-30 04:12 UTC)
 Encrypted with: openssl aes-256-cbc -pbkdf2 -salt
 Password: first 8 hex chars of the OOM-killer hash from /var/log/kern.log
 Contains: id_ed25519_cortex (access to the cortex management network)
@@ -714,6 +736,28 @@ EDGE_NGINX_502 = """\
 2026/10/26 03:12:04 [error] 842#842: *1024 connect() failed (111: Connection refused)
     while connecting to upstream, client: 10.66.0.1, server: api.internal.vesalius.io,
     request: "POST /v1/inference HTTP/1.1", upstream: "http://10.66.0.4:8000/v1/inference"
+"""
+
+#: The 502-sentinel access trail: repeated `edge-probe` POSTs every 23 seconds,
+#: then a health check from the 172.16.10.0/24 engine room.  Copied from v3's
+#: lookup table so the facade never forks the played evidence.
+EDGE_NGINX_ACCESS = """\
+10.66.0.1 - - [25/Oct/2026:23:04:24 +0000] "POST /v1/inference HTTP/1.1" 502 157 "-" "edge-probe/1.0"
+10.66.0.1 - - [25/Oct/2026:23:04:47 +0000] "POST /v1/inference HTTP/1.1" 502 157 "-" "edge-probe/1.0"
+10.66.0.1 - - [25/Oct/2026:23:05:10 +0000] "POST /v1/inference HTTP/1.1" 502 157 "-" "edge-probe/1.0"
+10.66.0.1 - - [25/Oct/2026:23:05:33 +0000] "POST /v1/inference HTTP/1.1" 502 157 "-" "edge-probe/1.0"
+10.66.0.1 - - [25/Oct/2026:23:05:56 +0000] "POST /v1/inference HTTP/1.1" 502 157 "-" "edge-probe/1.0"
+10.66.0.1 - - [25/Oct/2026:23:06:19 +0000] "POST /v1/inference HTTP/1.1" 502 157 "-" "edge-probe/1.0"
+172.16.10.1 - - [25/Oct/2026:23:06:42 +0000] "GET /health HTTP/1.1" 502 157 "-" "curl/7.81.0"
+"""
+
+#: ``git -C /home/ops/cortex-sre remote -v`` reads this; same text as v3's
+#: lookup table (short form: no [core] filemode line).
+EDGE_CORTEX_SRE_GIT_CONFIG = """\
+[core]
+\trepositoryformatversion = 0
+[remote "origin"]
+\turl = git@git.vesalius.internal:infra/cortex-sre.git
 """
 
 EDGE_UPSTREAM_CONF = """\
@@ -1573,7 +1617,7 @@ HIVE_AGENT_GENESIS = """\
 --------------------------------------------------------------
 The file is a raw attention checkpoint. Metadata:
   source_subject : specimen_04 (Lin)
-  harvest_date   : 2025-09-14 04:12:09 UTC
+  harvest_date   : 2025-08-30 04:12:09 UTC
   method         : prefrontal cortical slice -> spiking tensor -> LLM-Hybrid-v4
   note           : "the subject signed the harvest consent under sedation"
 
@@ -2932,8 +2976,7 @@ def _edge_entries() -> List[Tuple[str, Dict[str, Any]]]:
     add("/home/ops/.ssh/authorized_keys",
         _file(EDGE_AUTHORIZED_KEYS, mode=0o600, owner="ops", group="ops", mtime=_T_LIN))
     add("/home/ops/notes.txt",
-        _file(_body(HOST_EDGE, "/home/ops/notes.txt", EDGE_OPS_NOTES),
-              owner="ops", group="ops", mtime=_T_WAKE))
+        _file(EDGE_OPS_NOTES, owner="ops", group="ops", mtime=_T_WAKE))
     add("/home/ops/night_shift_handover.txt",
         _file(_body(HOST_EDGE, "/home/ops/night_shift_handover.txt",
                     "NIGHT SHIFT HANDOVER / EDGE / 2026-10-26 03:00 UTC\n"
@@ -2958,9 +3001,7 @@ def _edge_entries() -> List[Tuple[str, Dict[str, Any]]]:
     add("/home/ops/cortex-sre/.git/HEAD",
         _file("ref: refs/heads/main\n", owner="ops", group="ops", mtime=_T_LIN))
     add("/home/ops/cortex-sre/.git/config", _file(
-        "[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n"
-        "[remote \"origin\"]\n\turl = git@git.vesalius.internal:infra/cortex-sre.git\n",
-        owner="ops", group="ops", mtime=_T_LIN))
+        EDGE_CORTEX_SRE_GIT_CONFIG, owner="ops", group="ops", mtime=_T_LIN))
     add("/home/lin", _dir(owner="lin", group="lin", mtime=_T_LIN))
     add("/home/lin/.bashrc", _file(EDGE_ROOT_BASHRC, owner="lin", group="lin", mtime=_T_LIN))
     add("/home/lin/.bash_history", _file(
@@ -3104,8 +3145,7 @@ def _edge_entries() -> List[Tuple[str, Dict[str, Any]]]:
               desc="data", mtime=_T_NOW))
     add("/var/log/nginx", _dir(mtime=inst))
     add("/var/log/nginx/access.log", _file(
-        _body(HOST_EDGE, "/var/log/nginx/access.log", EDGE_NGINX_ACCESS),
-        mode=0o640, group="adm", mtime=_T_NOW))
+        EDGE_NGINX_ACCESS, mode=0o640, group="adm", mtime=_T_NOW))
     add("/var/log/nginx/error.log",
         _file(EDGE_NGINX_502, mode=0o640, group="adm", mtime=_T_NOW))
     add("/var/log/nginx/error.log.1.gz", _file(
@@ -3166,6 +3206,14 @@ def _edge_entries() -> List[Tuple[str, Dict[str, Any]]]:
     add("/proc/filesystems", _file(
         "nodev\tsysfs\nnodev\ttmpfs\nnodev\tbdev\n\text4\nnodev\tsockfs\n"
         "nodev\tproc\nnodev\tdevtmpfs\n\tvfat\n", mtime=boot))
+    add("/proc/stat", _file(_proc_stat(f), mtime=boot))
+    add("/proc/net", _dir(mtime=boot))
+    add("/proc/net/dev", _file(_proc_net_dev(f), mtime=_T_NOW))
+    add("/proc/net/tcp", _file(_proc_net_tcp(f), mtime=_T_NOW))
+    add("/proc/net/route", _file(
+        "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+        "eth0\t00000000\tFEFE410A\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"
+        "eth0\t0000A641\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n", mtime=boot))
 
     # ---- /sys ---------------------------------------------------------
     for name in ("bus", "class", "devices", "fs", "kernel", "module", "power"):
@@ -3646,6 +3694,14 @@ def _hive_entries() -> List[Tuple[str, Dict[str, Any]]]:
     add("/proc/filesystems", _file(
         "nodev\tsysfs\nnodev\ttmpfs\nnodev\tbdev\n\text4\nnodev\tsockfs\n"
         "nodev\tproc\nnodev\tdevtmpfs\n\tvfat\n", mtime=boot))
+    add("/proc/stat", _file(_proc_stat(f), mtime=boot))
+    add("/proc/net", _dir(mtime=boot))
+    add("/proc/net/dev", _file(_proc_net_dev(f), mtime=_T_NOW))
+    add("/proc/net/tcp", _file(_proc_net_tcp(f), mtime=_T_NOW))
+    add("/proc/net/route", _file(
+        "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+        "eth0\t00000000\tFEFE410A\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"
+        "eth0\t0000A641\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n", mtime=boot))
 
     # ---- /sys (the hive exposes its own control surface here) ----------
     for name in ("bus", "class", "devices", "fs", "kernel", "module", "power"):

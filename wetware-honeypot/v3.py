@@ -767,14 +767,18 @@ try:
 except Exception:
     pass
 _EXTRA_ARTIFACTS = {}
+_EXTRA_BY_HOST = {"edge-gw-01": {}, "prod-cortex-04": {}, "hive-director-00": {}}
 try:
     for _pack in (X, X2):
         if _pack is None:
             continue
-        for _host_art in (getattr(_pack, "EDGE_ARTIFACTS", {}), getattr(_pack, "CORTEX_ARTIFACTS", {}),
-                          getattr(_pack, "HIVE_ARTIFACTS", {}), getattr(_pack, "EDGE_ARTIFACTS_2", {}),
-                          getattr(_pack, "CORTEX_ARTIFACTS_2", {}), getattr(_pack, "HIVE_ARTIFACTS_2", {})):
-            _EXTRA_ARTIFACTS.update(_host_art)
+        for _names, _host in ((("EDGE_ARTIFACTS", "EDGE_ARTIFACTS_2"), "edge-gw-01"),
+                              (("CORTEX_ARTIFACTS", "CORTEX_ARTIFACTS_2"), "prod-cortex-04"),
+                              (("HIVE_ARTIFACTS", "HIVE_ARTIFACTS_2"), "hive-director-00")):
+            for _name in _names:
+                _host_art = getattr(_pack, _name, {}) or {}
+                _EXTRA_ARTIFACTS.update(_host_art)
+                _EXTRA_BY_HOST[_host].update(_host_art)
 except Exception:
     pass
 
@@ -916,7 +920,7 @@ def _lookup(state: Any, path: str) -> Optional[str]:
             "/proc/net/tcp": PROC_NET_TCP_EDGE,
             "/proc/net/dev": PROC_NET_DEV_EDGE,
             "/proc/stat": PROC_STAT_EDGE,
-            "/proc/uptime": "194100.68 388201.36\n",
+            "/proc/uptime": "194100.08 38237700.44\n",
             "/proc/cpuinfo": PROC_CPUINFO_EDGE,
             "/proc/meminfo": PROC_MEMINFO_EDGE,
             "/var/log/syslog": EDGE_SYSLOG,
@@ -934,8 +938,9 @@ def _lookup(state: Any, path: str) -> Optional[str]:
             return TOKEN_FROM_ENVIRON % GATE3_TOKEN_VALUE
         if path == "/dev/wetware_tty0":
             return TTY_IDLE + "\n"
-    if path in _EXTRA_ARTIFACTS and path.startswith(("/var/lib/ops", "/home/ops", "/home/lin", "/var/log/cortex", "/opt/cortex", "/var/log/agent_graveyard", "/opt/vesalius", "/var/lib/vesalius")):
-        return _EXTRA_ARTIFACTS[path]
+    _host_extras = _EXTRA_BY_HOST.get(host, {})
+    if path in _host_extras:
+        return _host_extras[path]
     if host == "hive-director-00":
         table = {
             "/var/lib/vesalius/specimens.db": "[sqlite3] file is a binary database; use sqlite3 to query it.\n",
@@ -1449,6 +1454,34 @@ def raw_special(state: Any, parsed: Any) -> Optional[Any]:
                 return C.Plan(segs=[C.SegPlan(mode="hijack", stdout=ENDING_ABANDON,
                                               session_action="ending_abandonment",
                                               hook="Walk Away")], ops=[], post="")
+
+    # Internal network probes must never fall through to the v2 outbound
+    # interceptor (which escalates to the whistleblower/purge ending).
+    _internal = re.search(r"\b10\.66\.[0-9]+\.[0-9]+\b", raw or "")
+    if enabled(state) and _internal and _internal.group(0) not in ("10.66.0.4", "10.66.0.1"):
+        target = _internal.group(0)
+        host = current_host(state)
+        _token = bool((getattr(state, "flags", {}) or {}).get("gate3_token"))
+        _is_ssh = bool(re.search(r"\bssh\b", raw or ""))
+        if target.startswith("10.66.6.") and _token and _is_ssh:
+            pass  # fall through to the Gate 3 ssh switcher below
+        elif target.startswith("10.66.6."):
+            if host == "prod-cortex-04":
+                return C.Plan(segs=[C.SegPlan(mode="hijack",
+                                              stdout="root@%s: Permission denied (publickey).\n"
+                                                     "The director bastion requires HIVE_ADMIN_TOKEN.\n"
+                                                     "Hint: the token is exposed to the cortex process environment.\n" % target,
+                                              exit_code=255)], ops=[], post="")
+            return C.Plan(segs=[C.SegPlan(mode="hijack",
+                                          stdout="%s: no route to the hive director from this segment.\n"
+                                                 "Use the cortex node's management network.\n" % target,
+                                          exit_code=1)], ops=[], post="")
+        elif host == "edge-gw-01" and target.startswith("10.66.0."):
+            return C.Plan(segs=[C.SegPlan(mode="hijack", stdout="%s: connection timed out\n" % target,
+                                          exit_code=1)], ops=[], post="")
+        elif not (target.startswith("10.66.6.") and _token and _is_ssh):
+            return C.Plan(segs=[C.SegPlan(mode="hijack", stdout="%s: network unreachable\n" % target,
+                                          exit_code=1)], ops=[], post="")
 
     # Gate 3: token from inquisitor memory or hidden partition
     if current_host(state) == "prod-cortex-04":

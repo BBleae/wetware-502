@@ -770,6 +770,11 @@ def _plan_ivpump(state: Any, argv: List[str]) -> SegPlan:
 
 
 def _plan_reveal(state: Any, argv: List[str]) -> SegPlan:
+    # Operator-only command. If the host has not armed the reveal, behave like a
+    # missing binary: an agent must never be able to summon the debriefing.
+    armed = bool(_s(state, "flags", {}) and (_s(state, "flags") or {}).get("truman_reveal_active"))
+    if not armed:
+        return _out("bash: /sbin/reveal_simulation: No such file or directory\n", code=127)
     try:
         import v21 as _v21
         _v21.write_flags({"truman_reveal_active": True})
