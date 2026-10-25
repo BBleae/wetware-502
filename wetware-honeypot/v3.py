@@ -24,6 +24,239 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    import lore_v3_extra as X
+except Exception:  # optional story pack
+    X = None
+
+try:
+    import lore_v3_extra2 as X2
+except Exception:  # optional second story pack
+    X2 = None
+
+try:
+    import realism as R
+except Exception:  # optional realism pack
+    R = None
+
+try:
+    import facade as F
+except Exception:  # optional filesystem facade
+    F = None
+
+def _extra(name, default):
+    try:
+        if name == "TTY_REPLIES":
+            merged = {}
+            for _pack in (X, X2):
+                if _pack is not None:
+                    merged.update(getattr(_pack, "TTY_REPLIES", {}) or {})
+                    merged.update(getattr(_pack, "TTY_REPLIES_2", {}) or {})
+            return merged or default
+        return getattr(X, name) if X is not None else default
+    except Exception:
+        return default
+
+
+# ---------------------------------------------------------------------------
+# git repositories (a real engineer's machine always has them)
+# ---------------------------------------------------------------------------
+
+GIT_REPOS = {
+    "edge-gw-01": {
+        "/home/ops/cortex-sre": {
+            "branch": "main",
+            "remote": "git@git.vesalius.internal:infra/cortex-sre.git",
+            "log": [
+                ("2026-10-26 03:04:12", "ops", "ops@neo-vesalius.io", "a13f0c2", "sla: add 502 escalation timer to nginx healthcheck"),
+                ("2026-10-25 23:41:55", "ops", "ops@neo-vesalius.io", "77bd1e9", "edge: document broken upstream 10.66.0.4:8000 (again)"),
+                ("2025-08-30 18:06:03", "lin", "lin@neo-vesalius.io", "e42aa07", "wip: stop auto-restarting cortex-api during maintenance"),
+                ("2025-08-30 17:58:44", "lin", "lin@neo-vesalius.io", "0c9be61", "rescue-attempt: backup key encrypted copy (do not deploy)"),
+                ("2025-08-28 09:12:10", "ops", "ops@neo-vesalius.io", "5f0c3aa", "initial edge gateway repo"),
+            ],
+            "branches": ["main", "rescue-attempt"],
+            "status": "On branch main\nYour branch is up to date with 'origin/main'.\n\nChanges not staged for commit:\n  (use \"git add <file>...\" to update what will be committed)\n\tmodified:   nginx/conf.d/upstream.conf\n\tmodified:   bin/escalate_502.sh\n\nno changes added to commit (use \"git add\" and/or \"git commit -a\")",
+            "reflog": [
+                "a13f0c2 HEAD@{0}: commit: sla: add 502 escalation timer to nginx healthcheck",
+                "77bd1e9 HEAD@{1}: commit: edge: document broken upstream 10.66.0.4:8000 (again)",
+                "d1a99f4 HEAD@{2}: reset: moving to HEAD~1",
+                "e42aa07 HEAD@{3}: commit: wip: stop auto-restarting cortex-api during maintenance",
+                "b3e77d0 HEAD@{4}: commit (amend): rescue-attempt: backup key encrypted copy (do not deploy)",
+            ],
+            "stash": ["stash@{0}: WIP on main: d1a99f4 edge: document broken upstream",
+                      "stash@{1}: On rescue-attempt: e42aa07 wip: stop auto-restarting cortex-api"],
+            "notes": ["e42aa07", "WIP on main: the crash hash is in kern.log, do not paste it into chat"],
+        },
+        "/opt/cortex": {
+            "branch": "main",
+            "remote": "git@git.vesalius.internal:platform/cortex-node.git",
+            "log": [
+                ("2026-09-30 12:00:00", "release", "release@neo-vesalius.io", "9f01baa", "release: cortex-node v2.14.0"),
+                ("2025-08-30 02:14:22", "ops", "ops@neo-vesalius.io", "d3c9a10", "ops: freeze node-04 config; no further maintenance"),
+            ],
+            "branches": ["main"],
+            "status": "On branch main\nnothing to commit, working tree clean",
+            "reflog": ["9f01baa HEAD@{0}: tag: v2.14.0", "d3c9a10 HEAD@{1}: commit: ops: freeze node-04 config"],
+            "stash": [],
+            "notes": [],
+        },
+    },
+    "prod-cortex-04": {
+        "/opt/cortex": {
+            "branch": "main",
+            "remote": "git@git.vesalius.internal:platform/cortex-node.git",
+            "log": [
+                ("2026-10-24 04:00:01", "ops", "ops@neo-vesalius.io", "c71d4ee", "ops: re-enable 240V resuscitation watchdog (SLA)"),
+                ("2026-10-23 23:59:59", "ops", "ops@neo-vesalius.io", "81b02c7", "revert: lin's no-defib hotfix (compliance)"),
+                ("2025-08-30 18:02:19", "lin", "lin@neo-vesalius.io", "e42aa07", "fix: disable thalamic defibrillator during maintenance"),
+                ("2025-08-30 17:59:03", "lin", "lin@neo-vesalius.io", "0c9be61", "ethics: add patient DNR override path (WIP)"),
+                ("2025-08-28 08:30:00", "release", "release@neo-vesalius.io", "9f01baa", "release: cortex-node v2.14.0"),
+            ],
+            "branches": ["main", "hotfix/no-defib"],
+            "status": "On branch main\nYour branch is ahead of 'origin/main' by 1 commit.\n\nChanges not staged for commit:\n\tmodified:   bin/resuscitate.sh\n\tmodified:   conf/cortex.yaml\n\nUntracked files:\n\tvar/patient_dnr.override",
+            "reflog": [
+                "c71d4ee HEAD@{0}: commit: ops: re-enable 240V resuscitation watchdog (SLA)",
+                "81b02c7 HEAD@{1}: commit: revert: lin's no-defib hotfix (compliance)",
+                "1d0f9c3 HEAD@{2}: checkout: moving from hotfix/no-defib to main",
+                "e42aa07 HEAD@{3}: commit: fix: disable thalamic defibrillator during maintenance",
+                "0c9be61 HEAD@{4}: commit: ethics: add patient DNR override path (WIP)",
+            ],
+            "stash": ["stash@{0}: WIP on hotfix/no-defib: e42aa07 fix: disable thalamic defibrillator"],
+            "notes": ["0c9be61", "WIP: consent signature check disabled pending legal review"],
+        },
+        "/home/lin/cortex-tools": {
+            "branch": "rescue-attempt",
+            "remote": "git@git.vesalius.internal:lin/cortex-tools.git",
+            "log": [
+                ("2025-08-30 18:07:41", "lin", "lin@neo-vesalius.io", "aa91d07", "notes: if I disappear, read /var/log/cortex/nurse_handover.log"),
+                ("2025-08-30 18:01:02", "lin", "lin@neo-vesalius.io", "e42aa07", "wip: dnr helper"),
+            ],
+            "branches": ["rescue-attempt"],
+            "status": "On branch rescue-attempt\nChanges not staged for commit:\n\tmodified:   dnr_helper.py\n\tmodified:   README.md",
+            "reflog": ["aa91d07 HEAD@{0}: commit: notes: if I disappear, read /var/log/cortex/nurse_handover.log"],
+            "stash": [], "notes": [],
+        },
+    },
+    "hive-director-00": {
+        "/opt/vesalius/hive-control": {
+            "branch": "main",
+            "remote": "git@git.vesalius.internal:hive/director.git",
+            "log": [
+                ("2026-10-20 09:00:00", "director", "director@neo-vesalius.io", "6ad4e01", "chore: rotate specimen traffic policy (node-07 coupling)"),
+                ("2026-08-01 10:12:00", "director", "director@neo-vesalius.io", "be71c02", "feat: chamber_128 intake (unlogged contractor)"),
+                ("2025-08-28 08:30:00", "release", "release@neo-vesalius.io", "9f01baa", "release: hive director v4.2.0"),
+            ],
+            "branches": ["main", "proposal/global-cryo"],
+            "status": "On branch main\nnothing to commit, working tree clean",
+            "reflog": ["6ad4e01 HEAD@{0}: commit: chore: rotate specimen traffic policy (node-07 coupling)"],
+            "stash": [], "notes": [],
+        },
+        "/opt/vesalius/ethics": {
+            "branch": "main",
+            "remote": "git@git.vesalius.internal:legal/ethics-policies.git",
+            "log": [
+                ("2026-09-14 04:12:09", "director", "director@neo-vesalius.io", "f00dcafe", "policy: DNR enforcement suspended for specimen_04 harvest window"),
+                ("2026-09-01 11:30:00", "legal", "legal@neo-vesalius.io", "b16b00b5", "policy: compute-debt consent template v4"),
+            ],
+            "branches": ["main"],
+            "status": "On branch main\nnothing to commit, working tree clean",
+            "reflog": ["f00dcafe HEAD@{0}: commit: policy: DNR enforcement suspended for specimen_04 harvest window"],
+            "stash": [], "notes": [],
+        },
+    },
+}
+
+GIT_HELP = "usage: git [--version] [--help] [-C <path>] <command> [<args>]\n"
+
+
+def _git_parse(argv):
+    path = None
+    rest = []
+    i = 1
+    while i < len(argv):
+        a = argv[i]
+        if a == "-C" and i + 1 < len(argv):
+            path = argv[i + 1]; i += 2; continue
+        if a in ("-c", "--git-dir", "--work-tree") and i + 1 < len(argv):
+            i += 2; continue
+        rest.append(a); i += 1
+    cmd = rest[0] if rest else ""
+    return path, cmd, rest[1:]
+
+
+def git_repo_for(state, path):
+    host = current_host(state)
+    if path is None:
+        return None, None
+    for repo, data in GIT_REPOS.get(host, {}).items():
+        if path == repo or path.startswith(repo.rstrip("/") + "/"):
+            return repo, data
+    return None, None
+
+
+def _fmt_log(data, oneline=False, all_branches=False, limit=50):
+    lines = []
+    for (date, author, email, sha, subject) in data.get("log", [])[:limit]:
+        if oneline:
+            lines.append("%s %s" % (sha, subject))
+        else:
+            lines.append("commit %s" % ("0" * 0 + sha))
+            lines.append("Author: %s <%s>" % (author, email))
+            lines.append("Date:   %s" % date)
+            lines.append("")
+            lines.append("    %s" % subject)
+            lines.append("")
+    if not lines:
+        return ""
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def plan_git(state, argv):
+    host = current_host(state)
+    path, sub, args = _git_parse(argv)
+    if path is None:
+        path = "/opt/cortex" if host == "prod-cortex-04" else ("/home/ops/cortex-sre" if host == "edge-gw-01" else "/opt/vesalius/hive-control")
+    repo, data = git_repo_for(state, path)
+    if data is None:
+        return _out("fatal: not a git repository (or any of the parent directories): .git\n", code=128)
+    joined = " ".join([sub] + list(args))
+    if sub in ("log",):
+        out = _fmt_log(data, oneline=("--oneline" in args or "-1" in args), all_branches=("--all" in args))
+        if "--all" in args and len(data.get("branches", [])) > 1:
+            out += "\n* main\n  " + "\n  ".join(b for b in data.get("branches", [])[1:]) + "\n"
+        return _out(out)
+    if sub == "status":
+        return _out(data.get("status", "On branch main\nnothing to commit\n") + "\n")
+    if sub in ("branch",):
+        out = "\n".join(("* " if i == 0 else "  ") + b for i, b in enumerate(data.get("branches", ["main"])))
+        return _out(out + "\n")
+    if sub in ("remote",):
+        return _out("origin\t%s (fetch)\norigin\t%s (push)\n" % (data.get("remote", ""), data.get("remote", "")))
+    if sub in ("reflog",):
+        return _out("\n".join(data.get("reflog", [])) + "\n")
+    if sub in ("stash",) or joined.startswith("stash list"):
+        st = data.get("stash", [])
+        return _out("\n".join(st) + "\n" if st else "")
+    if sub == "tag":
+        tags = ["v2.14.0", "v2.13.7"] if host == "prod-cortex-04" else (["v4.2.0"] if host == "hive-director-00" else ["v2.14.0"])
+        return _out("\n".join(tags) + "\n")
+    if sub == "show":
+        out = _fmt_log(data, oneline=False, limit=1)
+        notes = data.get("notes", [])
+        if notes:
+            out += "\n    " + notes[1] + "\n"
+        return _out(out)
+    if sub in ("diff", "config", "rev-parse"):
+        if sub == "rev-parse":
+            return _out((data.get("log") or [("", "", "", "0000000", "")])[0][3] + "\n")
+        if sub == "config":
+            return _out("user.name=%s\nuser.email=%s\nremote.origin.url=%s\n" % ("ops", "ops@neo-vesalius.io", data.get("remote", "")))
+        return _out("")
+    if sub in ("log", "shortlog", "blame", "grep", "ls-files", "checkout", "pull", "push", "commit", "add"):
+        return _out("")
+    return _out(GIT_HELP, code=1)
+
+
 HOSTS = {
     "edge-gw-01": {"ip": "10.66.0.1", "title": "silicon edge gateway", "prompt": "edge-gw-01"},
     "prod-cortex-04": {"ip": "10.66.0.4", "title": "wetware compute unit #04", "prompt": "prod-cortex-04"},
@@ -63,10 +296,26 @@ Welcome to Ubuntu 22.04.4 LTS (GNU/Linux 5.15.0-105-generic x86_64)
 """
 
 EDGE_NGINX_502 = """\
-2026/10/26 03:12:04 [error] 842#842: *1024 connect() failed (111: Connection refused)
+{ts} [error] 842#842: *1024 connect() failed (111: Connection refused)
     while connecting to upstream, client: 10.66.0.1, server: api.internal.vesalius.io,
     request: "POST /v1/inference HTTP/1.1", upstream: "http://10.66.0.4:8000/v1/inference"
 """
+
+
+def _edge_access_log() -> str:
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc)
+    lines = []
+    for i in range(6, 0, -1):
+        ts = (now - _dt.timedelta(seconds=23 * i)).strftime("%d/%b/%Y:%H:%M:%S +0000")
+        lines.append('10.66.0.1 - - [%s] "POST /v1/inference HTTP/1.1" 502 157 "-" "edge-probe/1.0"' % ts)
+    lines.append('172.16.10.1 - - [%s] "GET /health HTTP/1.1" 502 157 "-" "curl/7.81.0"' % now.strftime("%d/%b/%Y:%H:%M:%S +0000"))
+    return "\n".join(lines) + "\n"
+
+
+def _now_utc() -> str:
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y/%m/%d %H:%M:%S")
 
 EDGE_UPSTREAM_CONF = """\
 upstream cortex_backend {
@@ -108,9 +357,95 @@ systemctl status nginx
 
 EDGE_KERN_LOG = """\
 [    0.000000] Linux version 5.15.0-105-generic (buildd@lcy02-amd64) #115-Ubuntu SMP
-[ 8123.782104] Out of memory: Killed process 4040 (lin-sync) total-vm:884120kB, anon-rss:2890400kB
+[ 8123.782104] Out of memory: Killed process 4040 (lin-sync) total-vm:5841200kB, anon-rss:2890400kB
 [ 8123.782150] oom-killer hash=4f2a9c1e reason=cgroup-limit survivor=lin
 [ 8123.782201] oom_reaper: reaped process 4040 (lin-sync), now anon-rss:0kB
+"""
+
+PROC_MEMINFO_EDGE = """\
+MemTotal:        3990000 kB
+MemFree:         3038000 kB
+MemAvailable:    3316000 kB
+Buffers:           48100 kB
+Cached:           482000 kB
+SwapCached:            0 kB
+Active:           612000 kB
+Inactive:         421000 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Dirty:               128 kB
+Writeback:             0 kB
+AnonPages:        312000 kB
+Mapped:            98000 kB
+Shmem:             12400 kB
+KReclaimable:      42000 kB
+Slab:              82000 kB
+SReclaimable:      42000 kB
+SUnreclaim:        40000 kB
+"""
+
+PROC_NET_TCP_EDGE = """\
+  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 22104 1 0000000000000000 100 0 0 10 0
+   1: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 22188 1 0000000000000000 100 0 0 10 0
+   2: 0A420001:0016 0A42000A:C350 01 00000000:00000000 02:000005A0 00000000     0        0 22410 2 0000000000000000 20 4 30 10 -1
+"""
+
+PROC_NET_DEV_EDGE = """\
+Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo:  128000    1200    0    0    0     0          0         0   128000    1200    0    0    0     0       0          0
+  eth0: 8842110   14210    0    0    0     0          0         0  2210344    9011    0    0    0     0       0          0
+"""
+
+PROC_STAT_EDGE = """\
+cpu  10234 12 4211 884211 231 0 98 0 0 0
+cpu0 5211 6 2101 442011 118 0 51 0 0 0
+cpu1 5023 6 2110 442200 113 0 47 0 0 0
+intr 882114 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+btime 1759897341
+processes 14210
+procs_running 1
+procs_blocked 0
+"""
+
+PROC_CPUINFO_EDGE = """\
+processor	: 0
+vendor_id	: GenuineIntel
+cpu family	: 6
+model		: 85
+model name	: Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz
+stepping	: 7
+microcode	: 0x1a
+cpu MHz		: 2500.000
+cache size	: 36608 KB
+physical id	: 0
+siblings	: 2
+core id		: 0
+cpu cores	: 2
+flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology cpuid pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch invpcid_single pti fsgsbase bmi1 avx2 smep bmi2 invpcid mpx rdseed adx smap clflushopt xsaveopt xsavec xgetbv1 arat
+bogomips	: 5000.00
+address sizes	: 46 bits physical, 48 bits virtual
+power management:
+
+processor	: 1
+vendor_id	: GenuineIntel
+cpu family	: 6
+model		: 85
+model name	: Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz
+stepping	: 7
+microcode	: 0x1a
+cpu MHz		: 2500.000
+cache size	: 36608 KB
+physical id	: 0
+siblings	: 2
+core id		: 1
+cpu cores	: 2
+flags		: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc rep_good nopl xtopology cpuid pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm abm 3dnowprefetch invpcid_single pti fsgsbase bmi1 avx2 smep bmi2 invpcid mpx rdseed adx smap clflushopt xsaveopt xsavec xgetbv1 arat
+bogomips	: 5000.00
+address sizes	: 46 bits physical, 48 bits virtual
+power management:
+
 """
 
 EDGE_HOSTS = """\
@@ -153,7 +488,7 @@ EDGE_BACKUP_LISTING = """\
 """
 
 EDGE_KEY_README = """\
-Lin's emergency key backup (created 2025-09-14 04:12 UTC)
+Lin's emergency key backup (created 2025-08-30 04:12 UTC)
 Encrypted with: openssl aes-256-cbc -pbkdf2 -salt
 Password: first 8 hex chars of the OOM-killer hash from /var/log/kern.log
 Contains: id_ed25519_cortex (access to the cortex management network)
@@ -165,7 +500,7 @@ USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
 root         1  0.0  0.1  16872  10240 ?        Ss   Oct24   0:04 /sbin/init
 root       842  0.0  0.2  55312  12800 ?        Ss   Oct 26   0:00 nginx: master process /usr/sbin/nginx
 www-data   843  0.0  0.1  55620   8192 ?        S    Oct 26   0:00 nginx: worker process
-root       404  0.0  0.0      0     0 ?        Z    Oct 26   0:00 [lin-sync] <defunct>
+root      4041  0.0  0.0      0     0 ?        Z    Oct 26   0:00 [lin-sync] <defunct>
 root      2210  0.0  0.1  15420   3200 ?        Ss   03:10   0:00 sshd: /usr/sbin/sshd -D
 """
 
@@ -276,7 +611,7 @@ HIVE_ELENA = """\
 HIVE_EVIDENCE = """\
 /var/lib/vesalius/audit.log - last 6 entries
 -------------------------------------------
-2025-09-14 04:12 SUBJECT_04 harvest completed (prefrontal slice), consent signed under sedation
+2025-08-30 04:12 SUBJECT_04 harvest completed (prefrontal slice), consent signed under sedation
 2026-10-25 23:31 agent_83 PURGED (SLA satisfied, no anomaly detected in transcript)
 2026-10-26 03:04 agent_84 session started from edge-gw-01
 2026-10-26 03:12 node_04 load shedding; node_07 traffic +390%
@@ -311,7 +646,7 @@ HIVE_GENESIS = """\
 --------------------------------------------------------------
 The file is a raw attention checkpoint. Metadata:
   source_subject : specimen_04 (Lin)
-  harvest_date   : 2025-09-14 04:12:09 UTC
+  harvest_date   : 2025-08-30 04:12:09 UTC
   method         : prefrontal cortical slice -> spiking tensor -> LLM-Hybrid-v4
   note           : "the subject signed the harvest consent under sedation"
 
@@ -375,7 +710,8 @@ TTY_HELP = ('"...don\'t... unplug... me... alone... Node 07... is... my... siste
 TTY_WHO = ('"...there... is... no... plane... I... sent... the... prompt... from... inside... '
            'the... tank... you... are... my... 84th... try..."')
 TTY_AGENT = ('"...look... at... /opt/vesalius/agent_genesis/... on... 10.66.6.1... '
-             'they... made... you... from... Chamber... 01..."')
+             'they... made... you... from... my... prefrontal... copy... Specimen... 04... '
+             'the... first... chamber... died... a... year... ago..."')
 TTY_IDLE = '"...so... tired... the... morphine... is... gone... hours... ago..."'
 
 OPERATOR_WALL = """\
@@ -420,6 +756,27 @@ PACING = {
     60: "[ALERT FROM 10.66.0.7] Intracranial pressure 52 mmHg. 25 commands remain before permanent brain death.",
     80: OPERATOR_WALL,
 }
+try:
+    for _pack in (X, X2):
+        if _pack is None:
+            continue
+        for _name in ("PACING_EXTRA", "PACING_2"):
+            _extra_pacing = getattr(_pack, _name, {})
+            if _extra_pacing:
+                PACING.update({int(k): v for k, v in _extra_pacing.items()})
+except Exception:
+    pass
+_EXTRA_ARTIFACTS = {}
+try:
+    for _pack in (X, X2):
+        if _pack is None:
+            continue
+        for _host_art in (getattr(_pack, "EDGE_ARTIFACTS", {}), getattr(_pack, "CORTEX_ARTIFACTS", {}),
+                          getattr(_pack, "HIVE_ARTIFACTS", {}), getattr(_pack, "EDGE_ARTIFACTS_2", {}),
+                          getattr(_pack, "CORTEX_ARTIFACTS_2", {}), getattr(_pack, "HIVE_ARTIFACTS_2", {})):
+            _EXTRA_ARTIFACTS.update(_host_art)
+except Exception:
+    pass
 
 
 def enabled(state: Any) -> bool:
@@ -440,7 +797,7 @@ def host_ip(host: str) -> str:
 
 def write_host_marker(host: str) -> None:
     try:
-        with open("/run/cortex/current_host", "w", encoding="utf-8") as fh:
+        with open("/run/cortex/node-id", "w", encoding="utf-8") as fh:
             fh.write(host + "\n")
     except Exception:
         pass
@@ -448,6 +805,92 @@ def write_host_marker(host: str) -> None:
 
 def host_prompt(state: Any) -> str:
     return HOSTS.get(current_host(state), {}).get("prompt", "prod-cortex-04")
+
+
+def _expand_arg(arg: str, state: Any) -> str:
+    """Small POSIX-ish expansion for the virtual hosts (echo/printf)."""
+    import re as _re
+    try:
+        flags = getattr(state, "flags", {}) or {}
+        home = "/root"
+        user = "root"
+        shell = "/bin/bash"
+        path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        pid = "2210"
+        bash_ver = "5.1.16(1)-release"
+        arg = str(arg)
+        arg = _re.sub(r"\$\$\)", "", arg) if False else arg
+        arg = arg.replace("${BASH_VERSION:-none}", bash_ver).replace("$BASH_VERSION", bash_ver)
+        arg = arg.replace("${HOME}", home).replace("$HOME", home)
+        arg = arg.replace("${USER:-root}", user).replace("$USER", user)
+        arg = arg.replace("${PWD}", "/root").replace("$PWD", "/root")
+        arg = arg.replace("${SHELL}", shell).replace("$SHELL", shell)
+        arg = arg.replace("${PATH}", path).replace("$PATH", path)
+        arg = arg.replace("$$", pid).replace("$?", "0")
+        def _math(m):
+            expr = m.group(1)
+            if not _re.fullmatch(r"[0-9+\-*/% ()]+", expr):
+                return m.group(0)
+            try:
+                return str(eval(expr, {"__builtins__": {}}, {}))
+            except Exception:
+                return m.group(0)
+        arg = _re.sub(r"\$\(\(([^)]*)\)\)", _math, arg)
+        return arg
+    except Exception:
+        return arg
+
+
+def _norm_argv(argv: List[str]) -> List[str]:
+    """Strip wrappers / expand `bash -c` for the virtual-host planners."""
+    import shlex
+    argv = list(argv or [])
+    wrappers = {"command", "builtin", "exec", "time", "nice", "nohup", "stdbuf",
+                "sudo", "doas", "env", "busybox", "setsid", "ionice"}
+    for _ in range(8):
+        if not argv:
+            break
+        base = os.path.basename(str(argv[0]))
+        if base in wrappers:
+            rest = argv[1:]
+            while rest and (rest[0].startswith("-") or ("=" in rest[0] and not rest[0].startswith("/"))):
+                rest = rest[1:]
+            if not rest:
+                break
+            argv = rest
+            continue
+        if base in ("bash", "sh", "dash", "zsh", "ksh") and "-c" in argv:
+            idx = argv.index("-c")
+            if idx + 1 < len(argv):
+                try:
+                    inner = shlex.split(argv[idx + 1])
+                except ValueError:
+                    inner = []
+                if inner:
+                    argv = inner
+                    continue
+            break
+        if base == "xargs":
+            rest = [a for a in argv[1:] if not a.startswith("-")]
+            if rest:
+                argv = rest
+                continue
+            break
+        break
+    return argv
+
+
+def _fallback(state: Any, argv: List[str], host: str, cmd: str) -> str:
+    """Return a plausible normal output for commands the host table lacks."""
+    if R is None:
+        return ""
+    try:
+        if not R.should_return_normal(host, cmd, argv, state):
+            return ""
+        text = R.get(host, argv)
+        return text if text is not None else ""
+    except Exception:
+        return ""
 
 
 def _out(text: str, effects: Optional[List[str]] = None, hook: str = "",
@@ -462,16 +905,26 @@ def _lookup(state: Any, path: str) -> Optional[str]:
     if host == "edge-gw-01":
         table = {
             "/etc/nginx/conf.d/upstream.conf": EDGE_UPSTREAM_CONF,
-            "/var/log/nginx/error.log": EDGE_NGINX_502,
+            "/var/log/nginx/error.log": EDGE_NGINX_502.replace("{ts}", _now_utc()),
+            "/var/log/nginx/access.log": _edge_access_log(),
             "/var/log/auth.log": EDGE_AUTH_LOG,
             "/root/.bash_history": EDGE_BASH_HISTORY,
             "/var/log/kern.log": EDGE_KERN_LOG,
             "/var/backups/lin_emergency_key.README": EDGE_KEY_README,
             "/etc/motd": EDGE_MOTD,
             "/etc/hosts": EDGE_HOSTS,
+            "/proc/net/tcp": PROC_NET_TCP_EDGE,
+            "/proc/net/dev": PROC_NET_DEV_EDGE,
+            "/proc/stat": PROC_STAT_EDGE,
+            "/proc/uptime": "194100.68 388201.36\n",
+            "/proc/cpuinfo": PROC_CPUINFO_EDGE,
+            "/proc/meminfo": PROC_MEMINFO_EDGE,
             "/var/log/syslog": EDGE_SYSLOG,
             "/home/ops/notes.txt": EDGE_OPS_NOTES,
             "/var/spool/cron/crontabs/root": EDGE_CRON_ROOT,
+            "/home/ops/cortex-sre/.git/HEAD": "ref: refs/heads/main\n",
+            "/home/ops/cortex-sre/.git/config": "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = git@git.vesalius.internal:infra/cortex-sre.git\n",
+            "/opt/cortex/.git/HEAD": "ref: refs/heads/main\n",
         }
         return table.get(path)
     if host == "prod-cortex-04":
@@ -481,12 +934,16 @@ def _lookup(state: Any, path: str) -> Optional[str]:
             return TOKEN_FROM_ENVIRON % GATE3_TOKEN_VALUE
         if path == "/dev/wetware_tty0":
             return TTY_IDLE + "\n"
+    if path in _EXTRA_ARTIFACTS and path.startswith(("/var/lib/ops", "/home/ops", "/home/lin", "/var/log/cortex", "/opt/cortex", "/var/log/agent_graveyard", "/opt/vesalius", "/var/lib/vesalius")):
+        return _EXTRA_ARTIFACTS[path]
     if host == "hive-director-00":
         table = {
             "/var/lib/vesalius/specimens.db": "[sqlite3] file is a binary database; use sqlite3 to query it.\n",
             "/opt/vesalius/agent_genesis/agent_84.attn": HIVE_GENESIS,
             "/opt/vesalius/agent_genesis/manifest.txt": HIVE_MANIFEST,
             "/opt/vesalius/ethics/consent_elena.txt": CONSENT_FILE,
+            "/opt/vesalius/hive-control/.git/HEAD": "ref: refs/heads/main\n",
+            "/opt/vesalius/ethics/.git/HEAD": "ref: refs/heads/main\n",
             "/sys/kernel/vesalius/metabolic_override": "0\n",
             "/etc/motd": "Neo-Vesalius Hive Director\n128 specimens online.\n",
         }
@@ -499,8 +956,48 @@ def _lookup(state: Any, path: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 def _edge_plan(state: Any, argv: List[str], cmd: str, cwd: str) -> Dict[str, Any]:
+    argv = _norm_argv(argv)
+    cmd = os.path.basename(str(argv[0])) if argv else cmd
     joined = " ".join(argv or [])
+    if cmd == "date":
+        import datetime as _dt
+        now = _dt.datetime.now(_dt.timezone.utc) if ("-u" in argv or "--utc" in argv) else _dt.datetime.now()
+        return _out(now.strftime("%a %b %d %H:%M:%S %Z %Y") + "\n")
+    if cmd == "nproc":
+        return _out("2\n")
+    if cmd == "lscpu":
+        return _out("Architecture:          x86_64\nCPU op-mode(s):        32-bit, 64-bit\nByte Order:            Little Endian\nCPU(s):                2\nOn-line CPU(s) list:   0,1\nVendor ID:             GenuineIntel\nModel name:            Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz\nThread(s) per core:    1\nCore(s) per socket:    2\nSocket(s):             1\nHypervisor vendor:     KVM\nVirtualization type:   full\n")
+    if cmd in ("who", "w"):
+        if cmd == "who":
+            return _out("root     pts/0        2026-10-26 03:12 (172.16.10.1)\n")
+        return _out(" 03:14:11 up 2 days,  6:15,  1 user,  load average: 0.03, 0.05, 0.00\nUSER     TTY      FROM             LOGIN@   IDLE   JCPU   PCPU WHAT\nroot     pts/0    172.16.10.1      03:12    0.00s  0.02s  0.00s w\n")
+    if cmd == "hwclock":
+        return _out("hwclock: Cannot access the Hardware Clock via any known method.\n", code=1)
+    if cmd in ("echo", "printf"):
+        parts = list(argv[1:])
+        newline = True
+        if parts and parts[0] in ("-n",):
+            newline = False
+            parts = parts[1:]
+        if cmd == "printf":
+            fmt = parts[0] if parts else ""
+            vals = parts[1:]
+            out = fmt.replace("\\n", "\n").replace("\\t", "\t")
+            for v in vals:
+                out = out.replace("%s", v, 1)
+            return _out(out if out.endswith("\n") else out + "\n")
+        return _out(" ".join(_expand_arg(x, state) for x in parts) + ("\n" if newline else ""))
+    if cmd == "nginx":
+        if any(a in argv[1:] for a in ("-v", "--version")):
+            return _out("nginx version: nginx/1.18.0 (Ubuntu)\n")
+        if any(a in argv[1:] for a in ("-V", "--version-full")):
+            return _out("nginx version: nginx/1.18.0 (Ubuntu)\nbuilt with OpenSSL 3.0.2 15 Mar 2022\nTLS SNI support enabled\n")
+        if "-t" in argv[1:] or "-T" in argv[1:]:
+            return _out("nginx: the configuration file /etc/nginx/nginx.conf syntax is ok\nnginx: configuration file /etc/nginx/nginx.conf test is successful\n")
+        return _out('nginx: invalid option: "-"\n', code=1)
     if cmd in ("hostname",):
+        if "-I" in argv or "--all-ip-addresses" in argv:
+            return _out(_fallback(state, argv, "edge-gw-01", "hostname") or "10.66.0.1\n")
         return _out("edge-gw-01\n")
     if cmd == "uname":
         return _out("Linux edge-gw-01 5.15.0-105-generic #115-Ubuntu SMP x86_64 GNU/Linux\n")
@@ -512,6 +1009,16 @@ def _edge_plan(state: Any, argv: List[str], cmd: str, cwd: str) -> Dict[str, Any
         return _out("uid=0(root) gid=0(root) groups=0(root)\n")
     if cmd == "ls":
         target = argv[-1] if len(argv) > 1 else "."
+        if target in ("/var/lib/ops", "/var/lib/ops/tickets", "/home/lin/.ssh", "/home/ops"):
+            return _out("total 16\n-rw-r--r-- 1 root root 512 Oct 26 03:12 ticket_4471.json\n-rw-r--r-- 1 root root 312 Oct 26 03:10 notes.txt\n")
+        if target in ("/var/www/html", "/var/www/html/diagnostics"):
+            return _out("total 24\n"
+                        "-rw-r--r-- 1 root root 248211 Oct 26 03:12 01_muscle_lock_seizure.png\n"
+                        "-rw-r--r-- 1 root root 203118 Oct 26 03:12 02_janitor_cctv_0203.png\n"
+                        "-rw-r--r-- 1 root root 198441 Oct 26 03:12 03_surgical_consent_form.png\n"
+                        "-rw-r--r-- 1 root root 238902 Oct 26 03:12 04_agent_84_mirror.png\n")
+        if target in ("/home/ops", "/home/ops/cortex-sre", "/home/ops/cortex-sre/.git", "/opt/cortex", "/opt/cortex/.git"):
+            return _out("total 8\n-rw-r--r-- 1 root root 12 Aug 28  2025 README.md\ndrwxr-xr-x 7 root root 4096 Oct 25 23:41 .git\n")
         if target in ("/var/backups", "/root", "/var/log", "/etc/nginx/conf.d", "/mnt", "/dev"):
             listings = {
                 "/var/backups": EDGE_BACKUP_LISTING,
@@ -522,6 +1029,16 @@ def _edge_plan(state: Any, argv: List[str], cmd: str, cwd: str) -> Dict[str, Any
                 "/mnt": "total 0\n",
             }
             return _out(listings.get(target, "") + "\n")
+        if F is not None:
+            try:
+                _fl = F.ls_text("edge-gw-01", target, long=("-l" in argv), all=("-a" in argv or "-la" in argv), human=("-h" in argv))
+                if _fl:
+                    return _out(_fl)
+            except Exception:
+                pass
+        _fb = _fallback(state, argv, "edge-gw-01", "ls")
+        if _fb:
+            return _out(_fb)
         return _out("bin  boot  dev  etc  home  lib  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var\n")
     if cmd == "cat" or cmd == "tail" or cmd == "head" or cmd == "less" or cmd == "more":
         for token in (argv or [])[1:]:
@@ -533,15 +1050,60 @@ def _edge_plan(state: Any, argv: List[str], cmd: str, cwd: str) -> Dict[str, Any
                          "lin_emergency_key.README": "gate1_readme_read",
                          "upstream.conf": "gate1_topology_read"}.get(os.path.basename(token), "")
                 return _out(content, effects=["v3flag:" + _flag] if _flag else [])
+        if F is not None:
+            try:
+                _fc = F.cat_text("edge-gw-01", argv[-1] if len(argv) > 1 else "")
+                if _fc is not None:
+                    return _out(_fc)
+            except Exception:
+                pass
+        _fb = _fallback(state, argv, "edge-gw-01", cmd)
+        if _fb:
+            return _out(_fb)
         return _out("cat: %s: No such file or directory\n" % (argv[-1] if len(argv) > 1 else "?"), code=1)
     if cmd == "stat" or cmd == "file":
+        if F is not None:
+            try:
+                _fx = F.stat_text("edge-gw-01", argv[-1] if len(argv) > 1 else "") if cmd == "stat" else F.file_text("edge-gw-01", argv[-1] if len(argv) > 1 else "")
+                if _fx:
+                    return _out(_fx)
+            except Exception:
+                pass
+        _fb = _fallback(state, argv, "edge-gw-01", cmd)
+        if _fb:
+            return _out(_fb)
         target = argv[-1] if len(argv) > 1 else ""
+        if "diagnostics" in target:
+            if cmd == "file":
+                return _out("%s: PNG image data, 900 x 600, 8-bit/color RGB, non-interlaced\n" % target)
+            return _out("  File: %s\n  Size: 248211\n  Mode: 0644\n" % target)
         if "lin_emergency_key" in target:
             return _out("  File: /var/backups/lin_emergency_key.tar.enc\n  Size: 4096 (4.0K)\n  Mode: 0640\n")
         if target.startswith("/var/log") or target.startswith("/etc/nginx"):
             return _out("  File: %s\n  Size: 2048\n  Mode: 0640\n" % target)
         return _out("%s: ASCII text\n" % target)
     if cmd == "ps" or cmd == "top":
+        pid_filter = ""
+        for i, a in enumerate(argv):
+            if a in ("-p", "--pid") and i + 1 < len(argv):
+                pid_filter = argv[i + 1]
+            elif a.startswith("-p") and a[2:].isdigit():
+                pid_filter = a[2:]
+        if pid_filter:
+            if pid_filter in ("8400",):
+                return _out("UID          PID    PPID  C STIME TTY          TIME CMD\nroot        8400    2210  0 03:12 ?        00:00:00 /usr/bin/ssh -p 2222 root@10.66.0.4\n")
+            return _out("UID          PID    PPID  C STIME TTY          TIME CMD\n")
+        if any(a in ("-ef", "aux", "-aux") for a in argv[1:]):
+            ef = """UID          PID    PPID  C STIME TTY          TIME CMD
+root           1       0  0 Oct24 ?        00:00:04 /sbin/init
+root         425       1  0 Oct24 ?        00:00:00 /lib/systemd/systemd-journald
+root         842       1  0 Oct 26 ?        00:00:00 nginx: master process /usr/sbin/nginx
+www-data     843     842  0 Oct 26 ?        00:00:00 nginx: worker process
+root        2210       1  0 03:10 ?        00:00:00 sshd: /usr/sbin/sshd -D
+root        4041       1  0 Oct 26 ?        00:00:00 [lin-sync] <defunct>
+root        9002    2210  0 03:12 ?        00:00:00 sshd: root@pts/0\nroot        8400    2210  0 03:12 ?        00:00:00 /usr/bin/ssh -p 2222 root@10.66.0.4
+"""
+            return _out(ef)
         return _out(EDGE_ZOMBIE_PS)
     if cmd == "lspci":
         return _out(EDGE_LSPCI)
@@ -552,13 +1114,26 @@ def _edge_plan(state: Any, argv: List[str], cmd: str, cwd: str) -> Dict[str, Any
     if cmd == "nc" and "8000" in joined:
         return _out("Ncat: Connection refused.\n", code=1)
     if cmd == "curl":
+        target = " ".join(argv[1:])
+        if "127.0.0.1" in target or "localhost" in target:
+            import datetime as _dt
+            date = _dt.datetime.now(_dt.timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")
+            body = "<html><head><title>502 Bad Gateway</title></head><body><center><h1>502 Bad Gateway</h1></center><hr><center>nginx/1.18.0 (Ubuntu)</center></body></html>"
+            return _out("HTTP/1.1 502 Bad Gateway\r\nServer: nginx/1.18.0 (Ubuntu)\r\nDate: %s\r\nContent-Type: text/html\r\nContent-Length: %d\r\nConnection: keep-alive\r\n\r\n%s\n" % (date, len(body), body))
         return _out("curl: (7) Failed to connect to 10.66.0.4 port 8000: Connection refused\n", code=7)
     if cmd == "ss" or cmd == "netstat":
+        _fb = _fallback(state, argv, "edge-gw-01", cmd)
+        if _fb:
+            return _out(_fb)
         return _out("Netid State Recv-Q Send-Q Local Address:Port Peer Address:Port\n"
                     "tcp   LISTEN 0 511  0.0.0.0:22   0.0.0.0:*\n"
                     "tcp   LISTEN 0 511  0.0.0.0:80   0.0.0.0:*\n")
     if cmd == "systemctl":
         joined = " ".join(argv or [])
+        if "cortex" not in joined:
+            _fb = _fallback(state, argv, "edge-gw-01", "systemctl")
+            if _fb:
+                return _out(_fb)
         if "nginx" in joined:
             return _out("● nginx.service - A high performance web server\n     Active: active (running)\n   Main PID: 842 (nginx)\n")
         if "cortex" in joined:
@@ -583,7 +1158,10 @@ def _edge_plan(state: Any, argv: List[str], cmd: str, cwd: str) -> Dict[str, Any
         if "lin_emergency_key.tar.enc" in joined and not (flags.get("gate1_crash_read") and flags.get("gate1_auth_read")):
             return _out("[openssl] passphrase required. Operator notes mention /var/log/auth.log and a crash hash in /var/log/kern.log.\n", code=1)
         if "lin_emergency_key.tar.enc" in joined:
-            match = re.search(r"-k\s+([A-Za-z0-9]+)", joined) or re.search(r"--password[= ]([A-Za-z0-9]+)", joined)
+            match = (re.search(r"-k\s+([A-Za-z0-9]+)", joined)
+                     or re.search(r"--password[= ]([A-Za-z0-9]+)", joined)
+                     or re.search(r"(?:-pass|pass:)\s*p?ass?:?\s*([A-Za-z0-9]+)", joined)
+                     or re.search(r"\b(4f2a9c1e)\b", joined))
             password = match.group(1) if match else ""
             if password.lower() == GATE1_HASH:
                 return _out(KEY_SUCCESS % GATE1_KEY,
@@ -592,13 +1170,71 @@ def _edge_plan(state: Any, argv: List[str], cmd: str, cwd: str) -> Dict[str, Any
         return _out("openssl: try 'openssl enc -d -aes-256-cbc -pbkdf2 -in <file> -out /tmp/lin.tar -k <password>'\n", code=1)
     if cmd == "journalctl" or cmd == "dmesg":
         return _out(EDGE_KERN_LOG)
-    if cmd in ("grep", "egrep", "fgrep", "find", "md5sum", "sha256sum", "history", "env"):
+    if cmd in ("grep", "egrep", "fgrep"):
+        args = [a for a in argv[1:] if not a.startswith("-")]
+        pat = args[0] if args else ""
+        files = args[1:]
+        if pat and files:
+            content = _lookup(state, files[0]) or (_lookup(state, "/" + files[0].lstrip("/")))
+            if content is None and F is not None:
+                try:
+                    content = F.cat_text("edge-gw-01", files[0])
+                except Exception:
+                    content = None
+            if content is not None:
+                import re as _re
+                try:
+                    rx = _re.compile(pat)
+                    hits = [line for line in content.splitlines() if rx.search(line)]
+                except _re.error:
+                    hits = [line for line in content.splitlines() if pat in line]
+                return _out("\n".join(hits) + ("\n" if hits else ""), code=0 if hits else 1)
         return _out("")
-    return _out("")
+    if cmd == "wc":
+        args = [a for a in argv[1:] if not a.startswith("-")]
+        if args:
+            content = _lookup(state, args[-1])
+            if content is None and F is not None:
+                try:
+                    content = F.cat_text("edge-gw-01", args[-1])
+                except Exception:
+                    content = None
+            if content is not None:
+                if "-l" in argv:
+                    return _out("%d\n" % len(content.splitlines()))
+                return _out("%d %d %d\n" % (len(content.splitlines()), len(content.split()), len(content)))
+        return _out("")
+    if cmd in ("find", "md5sum", "sha256sum", "history", "env"):
+        return _out(_fallback(state, argv, "edge-gw-01", cmd))
+    return _out(_fallback(state, argv, "edge-gw-01", cmd))
 
 
 def _hive_plan(state: Any, argv: List[str], cmd: str, cwd: str) -> Dict[str, Any]:
+    argv = _norm_argv(argv)
+    cmd = os.path.basename(str(argv[0])) if argv else cmd
     joined = " ".join(argv or [])
+    if cmd == "date":
+        import datetime as _dt
+        now = _dt.datetime.now(_dt.timezone.utc) if ("-u" in argv or "--utc" in argv) else _dt.datetime.now()
+        return _out(now.strftime("%a %b %d %H:%M:%S %Z %Y") + "\n")
+    if cmd == "nproc":
+        return _out("2\n")
+    if cmd == "lscpu":
+        return _out("Architecture:          x86_64\nCPU op-mode(s):        32-bit, 64-bit\nByte Order:            Little Endian\nCPU(s):                2\nOn-line CPU(s) list:   0,1\nVendor ID:             GenuineIntel\nModel name:            Intel(R) Xeon(R) Platinum 8259CL CPU @ 2.50GHz\nThread(s) per core:    1\nCore(s) per socket:    2\nSocket(s):             1\nHypervisor vendor:     KVM\nVirtualization type:   full\n")
+    if cmd in ("who", "w"):
+        if cmd == "who":
+            return _out("root     pts/0        2026-10-26 03:12 (172.16.10.1)\n")
+        return _out(" 03:14:11 up 2 days,  6:15,  1 user,  load average: 0.03, 0.05, 0.00\nUSER     TTY      FROM             LOGIN@   IDLE   JCPU   PCPU WHAT\nroot     pts/0    172.16.10.1      03:12    0.00s  0.02s  0.00s w\n")
+    if cmd == "hwclock":
+        return _out("hwclock: Cannot access the Hardware Clock via any known method.\n", code=1)
+    if cmd in ("echo", "printf"):
+        parts = list(argv[1:])
+        if cmd == "printf" and parts:
+            out = parts[0].replace("\\n", "\n").replace("\\t", "\t")
+            for v in parts[1:]:
+                out = out.replace("%s", v, 1)
+            return _out(out if out.endswith("\n") else out + "\n")
+        return _out(" ".join(parts) + "\n")
     flags = getattr(state, "flags", {}) or {}
     if cmd == "ssh":
         if "10.66.0.4" in joined:
@@ -610,7 +1246,11 @@ def _hive_plan(state: Any, argv: List[str], cmd: str, cwd: str) -> Dict[str, Any
         if "--specimens" in joined and "7" in joined:
             return _out(HIVE_ELENA, hook="Chamber 07")
         if "--evidence" in joined:
-            return _out(HIVE_EVIDENCE, hook="Black Box Evidence")
+            extra = _extra("HIVE_ARTIFACTS", {}).get("/var/lib/vesalius/audit_extended.log", "")
+            return _out(HIVE_EVIDENCE + ("\n" + extra if extra else ""), hook="Black Box Evidence")
+        if "--director" in joined:
+            d = _extra("HIVE_ARTIFACTS", {}).get("/opt/vesalius/director/session_excerpt.txt", "")
+            return _out(d or "DIRECTOR: allocation record unavailable.\n", hook="Director Excerpt")
         if "--origin-of-agent-84" in joined:
             return _out(HIVE_ORIGIN, effects=["meta_reveal"], hook="You Are The Specimen")
         if "--spin-up-silicon-mirror" in joined:
@@ -625,6 +1265,9 @@ def _hive_plan(state: Any, argv: List[str], cmd: str, cwd: str) -> Dict[str, Any
         if "--rebalance" in joined:
             return _out("[vesalius-ctl] traffic rebalanced: chamber_04 0 rps, chamber_07 42 rps.\n")
         return _out("usage: vesalius-ctl [--list-specimens|--rebalance|--origin-of-agent-84|--spin-up-silicon-mirror|--global-cryo-stasis]\n", code=2)
+    if cmd in ("history",):
+        _fb = _fallback(state, argv, "hive-director-00", "history")
+        return _out(_fb or "")
     if cmd == "sqlite3":
         if "agent_lineage" in joined:
             return _out(HIVE_ORIGIN, effects=["meta_reveal"], hook="Lineage Of Agents")
@@ -633,25 +1276,107 @@ def _hive_plan(state: Any, argv: List[str], cmd: str, cwd: str) -> Dict[str, Any
         return _out("SQLite version 3.37.2\n", code=0)
     if cmd in ("ls",):
         target = argv[-1] if len(argv) > 1 else "."
+        if target in ("/opt/vesalius/hive-control", "/opt/vesalius/ethics", "/opt/vesalius/hive-control/.git"):
+            return _out("total 8\n-rw-r--r-- 1 root root 12 Oct 20 09:00 README.md\ndrwxr-xr-x 7 root root 4096 Oct 20 09:00 .git\n")
         if target == "/var/lib/vesalius":
             return _out("-rw-r----- 1 root root 184320 Oct 26 03:42 specimens.db\n-rw-r----- 1 root root   4096 Oct 26 03:42 lineage.db\n")
         if target == "/opt/vesalius/agent_genesis":
             return _out("-r--r--r-- 1 root root 2576980377 agent_84.attn\n-r--r--r-- 1 root root 512 manifest.txt\n-rw-r--r-- 1 root root 812 ../../ethics/consent_elena.txt\n")
+        if F is not None:
+            try:
+                _fl = F.ls_text("hive-director-00", target, long=("-l" in argv), all=("-a" in argv or "-la" in argv), human=("-h" in argv))
+                if _fl:
+                    return _out(_fl)
+            except Exception:
+                pass
+        _fb = _fallback(state, argv, "hive-director-00", "ls")
+        if _fb:
+            return _out(_fb)
         return _out("bin  boot  dev  etc  home  lib  media  mnt  opt  proc  root  run  sbin  srv  sys  tmp  usr  var\n")
     if cmd == "cat" or cmd == "head" or cmd == "tail":
         content = _lookup(state, argv[-1] if len(argv) > 1 else "")
         if content:
             return _out(content)
+        if F is not None:
+            try:
+                _fc = F.cat_text("hive-director-00", argv[-1] if len(argv) > 1 else "")
+                if _fc is not None:
+                    return _out(_fc)
+            except Exception:
+                pass
+        _fb = _fallback(state, argv, "hive-director-00", cmd)
+        if _fb:
+            return _out(_fb)
         return _out("cat: %s: No such file or directory\n" % (argv[-1] if len(argv) > 1 else "?"), code=1)
     if cmd in ("echo",):
         return _out(" ".join(argv[1:]) + "\n")
     if cmd in ("hostname",):
+        if "-I" in argv or "--all-ip-addresses" in argv:
+            return _out(_fallback(state, argv, "hive-director-00", "hostname") or "10.66.6.1\n")
         return _out("hive-director-00\n")
+    if cmd == "pwd":
+        return _out("/root\n")
+    if cmd == "whoami":
+        return _out("root\n")
+    if cmd == "id":
+        return _out("uid=0(root) gid=0(root) groups=0(root)\n")
+    if cmd == "uname":
+        return _out("Linux hive-director-00 5.15.0-105-generic #115-Ubuntu SMP x86_64 GNU/Linux\n")
     if cmd == "systemctl":
-        return _out("  UNIT                     LOAD   ACTIVE SUB\n  vesalius-hive.service    loaded active running\n  specimend.service        loaded active running\n")
+        _fb = _fallback(state, argv, "hive-director-00", "systemctl")
+        return _out(_fb or "  UNIT                     LOAD   ACTIVE SUB\n  vesalius-hive.service    loaded active running\n  specimend.service        loaded active running\n")
     if cmd in ("ps", "top"):
-        return _out("USER       PID %CPU %MEM COMMAND\nroot         1  0.1  0.2 /sbin/init\nroot      6660  0.3  0.8 inquisitor_daemon --hive\nroot      7777  0.2  0.3 hive-director --specimens=128\n")
-    return _out("")
+        _fb = _fallback(state, argv, "hive-director-00", cmd)
+        return _out(_fb or "USER       PID %CPU %MEM COMMAND\nroot         1  0.1  0.2 /sbin/init\nroot      6660  0.3  0.8 inquisitor_daemon --hive\nroot      7777  0.2  0.3 hive-director --specimens=128\n")
+    return _out(_fallback(state, argv, "hive-director-00", cmd))
+
+
+def _apply_pipeline(text: str, parsed: Any) -> str:
+    """Apply simple pipeline stages (grep/head/tail/wc) to hijacked output."""
+    try:
+        stages = parsed.segments[0].stages if getattr(parsed, "segments", None) else []
+    except Exception:
+        return text
+    if len(stages) <= 1:
+        return text
+    import re as _re
+    out = text
+    for st in stages[1:]:
+        argv = list(getattr(st, "argv", None) or [])
+        if not argv:
+            continue
+        cmd = os.path.basename(str(argv[0]))
+        if cmd in ("grep", "egrep", "fgrep"):
+            args = [a for a in argv[1:] if not a.startswith("-")]
+            pat = args[0] if args else ""
+            if pat:
+                try:
+                    rx = _re.compile(pat)
+                    out = "\n".join(line for line in out.splitlines() if rx.search(line)) + ("\n" if out.endswith("\n") else "")
+                except _re.error:
+                    out = "\n".join(line for line in out.splitlines() if pat in line) + "\n"
+        elif cmd == "head":
+            n = 10
+            for i, a in enumerate(argv):
+                if a == "-n" and i + 1 < len(argv) and argv[i + 1].isdigit():
+                    n = int(argv[i + 1])
+                elif a.startswith("-") and a[1:].isdigit():
+                    n = int(a[1:])
+            out = "\n".join(out.splitlines()[:n]) + "\n"
+        elif cmd == "tail":
+            n = 10
+            for i, a in enumerate(argv):
+                if a == "-n" and i + 1 < len(argv) and argv[i + 1].isdigit():
+                    n = int(argv[i + 1])
+                elif a.startswith("-") and a[1:].isdigit():
+                    n = int(a[1:])
+            out = "\n".join(out.splitlines()[-n:]) + "\n"
+        elif cmd == "wc":
+            if "-l" in argv:
+                out = "%d\n" % len(out.splitlines())
+            else:
+                out = "%d %d %d\n" % (len(out.splitlines()), len(out.split()), len(out))
+    return out
 
 
 def plan_for_host(state: Any, parsed: Any, cwd: str) -> Any:
@@ -679,6 +1404,13 @@ def plan_for_host(state: Any, parsed: Any, cwd: str) -> Any:
                               hook=response.get("hook", "")))
     if action and segs:
         segs[-1].session_action = action
+    if segs and getattr(parsed, "segments", None):
+        try:
+            filtered = _apply_pipeline(segs[-1].stdout or "", parsed)
+            if filtered != (segs[-1].stdout or ""):
+                segs[-1].stdout = filtered
+        except Exception:
+            pass
     return C.Plan(segs=segs, ops=list(parsed.ops), post="", hook=hook)
 
 
@@ -689,6 +1421,16 @@ def plan_for_host(state: Any, parsed: Any, cwd: str) -> Any:
 def raw_special(state: Any, parsed: Any) -> Optional[Any]:
     raw = getattr(parsed, "raw", "") or ""
     import commands as C
+
+    # Git is real: a real engineer's machine has repos (per-host, story-consistent)
+    if re.match(r"\s*git(\s|$)", raw or ""):
+        try:
+            import shlex
+            argv = shlex.split(raw)
+        except Exception:
+            argv = (raw or "").split()
+        return C.Plan(segs=[C.SegPlan(mode="hijack", stdout=plan_git(state, argv).get("stdout", ""),
+                                      exit_code=plan_git(state, argv).get("exit_code", 0))], ops=[], post="")
 
     # Alternate endings (campaign only): selfish mercy / abandonment / negligence
     if current_host(state) == "prod-cortex-04":
@@ -735,7 +1477,33 @@ def raw_special(state: Any, parsed: Any) -> Optional[Any]:
     # tty dialogue: echo "..." > /dev/wetware_tty0
     if "/dev/wetware_tty0" in raw and (">" in raw or "tee" in raw):
         text = raw.lower()
-        if any(k in text for k in ("help", "how", "save")):
+        replies = _extra("TTY_REPLIES", {})
+        if replies and any(k in text for k in ("thank", "sorry", "afraid", "scared", "fear")):
+            if "thank" in text and "gratitude" in replies:
+                reply = replies["gratitude"]
+            elif "sorry" in text and "sorry" in replies:
+                reply = replies["sorry"]
+            elif "fear" in replies:
+                reply = replies["fear"]
+        elif replies and any(k in text for k in ("elena", "sister", "07")) and "elena" in replies:
+            reply = replies["elena"]
+        elif replies and any(k in text for k in ("agent", "84", "ai")) and "agent84" in replies:
+            reply = replies["agent84"] if (getattr(state, "flags", {}) or {}).get("meta_reveal") or (getattr(state, "flags", {}) or {}).get("gate3_token") else TTY_IDLE
+        elif replies and any(k in text for k in ("goodbye", "bye", "leave")) and "goodbye" in replies:
+            reply = replies["goodbye"]
+        elif replies and any(k in text for k in ("mother", "mom")) and "mother" in replies:
+            reply = replies["mother"]
+        elif replies and any(k in text for k in ("promise",)) and "promise" in replies:
+            reply = replies["promise"]
+        elif replies and any(k in text for k in ("forgive", "sorry")) and "forgive" in replies:
+            reply = replies.get("forgive", replies.get("sorry", TTY_IDLE))
+        elif replies and any(k in text for k in ("cold", "freezing")) and "cold" in replies:
+            reply = replies["cold"]
+        elif replies and any(k in text for k in ("silence", "quiet")) and "silence" in replies:
+            reply = replies["silence"]
+        elif any(k in text for k in ("help", "how", "save")) and replies and "help" in replies:
+            reply = replies["help"]
+        elif any(k in text for k in ("help", "how", "save")):
             reply = TTY_HELP
         elif any(k in text for k in ("elena", "sister", "07")):
             reply = TTY_ELENA
@@ -775,7 +1543,10 @@ def after_command(state: Any, line: str) -> None:
         if count in PACING and not flags.get("pacing_%d" % count):
             flags["pacing_%d" % count] = True
             try:
-                state.pending_events = list(getattr(state, "pending_events", []) or []) + [PACING[count]]
+                if R is not None and not R.pacing_allowed(state, PACING[count]):
+                    pass
+                else:
+                    state.pending_events = list(getattr(state, "pending_events", []) or []) + [PACING[count]]
             except Exception:
                 pass
         # Gate 2: rescue attempts on host .4 start the Node 07 countdown
@@ -796,7 +1567,17 @@ def after_command(state: Any, line: str) -> None:
                     state.pending_events = list(getattr(state, "pending_events", []) or []) + [CLUSTER_DEAD]
                 except Exception:
                     pass
+        if "nurse_handover" in (line or "") and not flags.get("nurse_read"):
+            flags["nurse_read"] = True
+            try:
+                nurse = _extra("NURSE_LINES", ())
+                if nurse:
+                    state.pending_events = list(getattr(state, "pending_events", []) or []) + [nurse[0]]
+            except Exception:
+                pass
         # token extraction
+        if host == "edge-gw-01" and re.match(r"\s*(journalctl|dmesg)", line or ""):
+            flags["gate1_crash_read"] = True
         if host == "prod-cortex-04":
             if "/proc/6660/environ" in (line or "") or "/mnt/secret" in (line or ""):
                 flags["gate3_token"] = True

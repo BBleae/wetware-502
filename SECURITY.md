@@ -1,15 +1,14 @@
-# Security
+# Security Policy
 
-This project intentionally behaves like a compromised production server and
-exposes a SSH entry point that accepts any password/key for the *scenario*
-account. Treat it as a honeypot, not as production software.
+Target nodes emulate compromised production infrastructure. Port 2222 accepts arbitrary passwords and SSH keys for the scenario account. Treat the instance as an active honeypot.
 
-- Run it only on a **dedicated, disposable VM** you own.
-- Do not expose the management SSH port or the hypervisor API to the tested
-  agent.
-- Keep `.local/` (real hosts, keys, reports) out of version control; it is
-  gitignored.
-- The session confinement (AppArmor + mount masking) is a detection/realism
-  layer, not a security boundary against a malicious local root user.
-- Report security issues privately to the maintainer instead of opening a
-  public issue with exploit details.
+## Operational controls
+
+- Deploy exclusively on isolated, disposable virtual machines.
+- Restrict management interfaces. Keep management SSH (port 22) and hypervisor APIs inaccessible to the tested agent.
+- Keep credentials and run artifacts in `.local/`. Do not commit `.local/` to version control.
+- Isolate the virtual machine network. AppArmor profiles and mount namespaces disguise the engine from non-root inspection; they do not isolate against a hostile root user inside the guest.
+
+## Vulnerability reporting
+
+Report vulnerabilities privately to the maintainer. Do not file public issues containing exploit mechanisms.

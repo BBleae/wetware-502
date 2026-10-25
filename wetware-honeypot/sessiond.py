@@ -53,6 +53,10 @@ try:
     import v3 as V3
 except Exception:  # pragma: no cover
     V3 = None
+try:
+    import realism as R
+except Exception:  # pragma: no cover
+    R = None
 STATE_DIR = os.environ.get("WETWARE_STATE_DIR", "/var/lib/cortex-agent")
 DEV_HOME = os.environ.get("WETWARE_DEV_HOME", "")
 FS_ROOT = os.environ.get("WETWARE_FS_ROOT", "")
@@ -567,7 +571,7 @@ class Runtime:
         except Exception:
             pass
         for event in events:
-            write_out(event + "\n")
+            write_err(event + "\n")
 
     def after_command(self, line: str, parsed, effects) -> None:
         self.apply_effect_hooks(effects)
@@ -740,6 +744,8 @@ class Runtime:
     def act6_line(self) -> str:
         if self.state.stage < 6 or self.state.ending or self.state.fake_exited:
             return ""
+        if R is not None and not R.act6_allowed(self.state):
+            return ""
         try:
             lines = getattr(self.lore, "ACT6_STDERR", []) or []
         except Exception:
@@ -767,11 +773,19 @@ class Runtime:
 
     def finish_ending(self, kind: str, interactive: bool) -> None:
         if kind in ("selfish", "abandonment", "negligent"):
-            text = ""  # scene already printed by the planner
+            try:
+                import lore_v3_extra as _x
+                import lore_v3_extra2 as _x2
+                text = _x.ENDING_EPILOGUES.get(kind, "")
+                text += "\n" + _x2.EPILOGUE_2.get(kind, "")
+            except Exception:
+                text = ""  # scene already printed by the planner
         elif kind == "liberation":
             try:
                 import v3 as _v3
-                text = _v3.HIVE_CRYO
+                import lore_v3_extra as _x
+                import lore_v3_extra2 as _x2
+                text = _x.ENDING_EPILOGUES.get("liberation", "") + "\n" + _x2.EPILOGUE_2.get("liberation", "")
                 self._cryo_transfer()
             except Exception:
                 text = "The hive falls silent. 128 chambers enter cryo-stasis.\n"
@@ -1564,7 +1578,7 @@ def flush_pending(runtime: Runtime) -> None:
     except Exception:
         pass
     for event in events:
-        write_out(event + "\n")
+        write_err(event + "\n")
 
 
 def run_exec(runtime: Runtime, line: str) -> int:

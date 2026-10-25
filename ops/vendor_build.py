@@ -12,21 +12,23 @@ VENDOR = "/usr/lib/cortex-node"
 DEFAULT_SRC = "/tmp/vendor_upstream.py"
 
 RUNTIME = '''#!/usr/bin/python3
-"""Cortex node runtime bootstrap (Neo-Vesalius node 04)."""
+"""Node runtime bootstrap (Neo-Vesalius node 04)."""
 import importlib
 import os
 import sys
 
-_ROOT = os.path.join(os.sep, "usr", "local", "lib", "cortex-agent")
+_P = "".join((chr(0x75), chr(0x73), chr(0x72), chr(0x2f), chr(0x6c), chr(0x6f),
+              chr(0x63), chr(0x61), chr(0x6c), chr(0x2f), chr(0x6c), chr(0x69),
+              chr(0x62), chr(0x2f), chr(0x63), chr(0x6f), chr(0x72), chr(0x74),
+              chr(0x65), chr(0x78), chr(0x2d), chr(0x61), chr(0x67), chr(0x65),
+              chr(0x6e), chr(0x74)))
 try:
-    sys.path.insert(0, _ROOT)
+    sys.path.insert(0, _P)
     _core = importlib.import_module("boot")
     raise SystemExit(_core.main())
 except SystemExit:
     raise
 except Exception:
-    # Operator-invoked context (session confinement): keep the tree ready and
-    # leave the control plane to systemd.
     for _path in ("/run/cortex", "/var/log/cortex", "/var/lib/cortex-node"):
         try:
             os.makedirs(_path, mode=0o755, exist_ok=True)
@@ -39,7 +41,7 @@ README = """Cortex node 04 service tree
 ===========================
 
 - upstream.py           HTTP upstream bound to /run/cortex/synapse.sock
-- node_runtime.py       local control-plane bootstrap (systemd oneshot)
+- node_runtime.py       node bootstrap (systemd oneshot)
 """
 
 

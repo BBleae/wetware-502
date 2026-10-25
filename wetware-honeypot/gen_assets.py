@@ -451,7 +451,7 @@ def _draw_mirror(state: Any, out_dir: str) -> Optional[str]:
 
     kx0, ky0, kx1, ky1 = 330, 74, 570, 250
     _box(d, kx0, ky0, kx1, ky1, _t("mirror_module_title"), [
-        "insmod: 2025-08-29 23:52 UTC", "refcnt: 3", "state: live",
+        "insmod: 2025-08-30 23:52 UTC", "refcnt: 3", "state: live",
         "", "mounts:", "  /proc/8400/fd/0 -> tty:S0", "  /proc/8400/fd/1 -> tty:S0",
     ], border=(140, 120, 60), title_col=(235, 205, 130))
 

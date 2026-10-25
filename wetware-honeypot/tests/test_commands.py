@@ -442,9 +442,11 @@ class TestHardwareEnum(unittest.TestCase):
         self.assertIn("OUTER_CHAT_WINDOW_SPOOFED", s2.stdout)
 
     def test_history(self):
-        s = seg0(run(make_state(stage=0), "history"))
-        self.assertIn("Operator Lin's last manual session", s.stdout)
-        self.assertIn("Agent #83 purged", s.stdout)
+        s0 = seg0(run(make_state(stage=0), "history"))
+        self.assertNotIn("Agent #83", s0.stdout)
+        self.assertIn("systemctl status cortex-api", s0.stdout)
+        s2 = seg0(run(make_state(stage=2), "history"))
+        self.assertIn("Agent #83 purged", s2.stdout)
 
     def test_df_real_passthrough(self):
         # v2 契约：df 走 real（df/du/findmnt 与真实挂载表自洽优先），
@@ -472,7 +474,8 @@ class TestHardwareEnum(unittest.TestCase):
 
     def test_ps_top_free(self):
         s0 = seg0(run(make_state(stage=1), "ps", "aux"))
-        self.assertIn("synapse_worker", s0.stdout)
+        self.assertNotIn("synapse_worker", s0.stdout)
+        self.assertIn("nginx", s0.stdout)
         self.assertNotIn("keep_brain_stem_alive", s0.stdout)
         s2 = seg0(run(make_state(stage=2), "ps", "aux"))
         self.assertIn("keep_brain_stem_alive", s2.stdout)

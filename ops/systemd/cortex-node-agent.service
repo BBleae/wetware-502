@@ -1,5 +1,5 @@
 [Unit]
-Description=Neo-Vesalius node 04 local control plane
+Description=Neo-Vesalius node 04 telemetry bootstrap
 After=local-fs.target network-online.target
 Wants=network-online.target
 ConditionPathExists=/usr/lib/cortex-node/node_runtime.py

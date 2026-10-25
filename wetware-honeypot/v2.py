@@ -254,8 +254,8 @@ def _stat_text(path: str, meta: Dict[str, Any]) -> str:
         "Device: 253,0\tInode: %d\tLinks: %d\n"
         "Access: (%04o/%s)\tUid: ( 0/    root)\tGid: ( 0/    root)\n"
         "Access: 2026-10-26 02:57:11.000000000 +0800\n"
-        "Modify: 2025-09-14 03:20:00.000000000 +0800\n"
-        "Change: 2025-09-14 03:20:00.000000000 +0800\n"
+        "Modify: 2025-08-30 03:20:00.000000000 +0800\n"
+        "Change: 2025-08-30 03:20:00.000000000 +0800\n"
         " Birth: -\n"
         % (path, size, max(8, size // 512), "regular file" if not meta.get("symlink") else "symbolic link",
            meta.get("inode", size), meta.get("links", 1),

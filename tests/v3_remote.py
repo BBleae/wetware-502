@@ -95,6 +95,8 @@ async def main() -> int:
     check("black-box evidence", "agent_84" in out and "node_07" in out, out)
     rc, out = await run(player, "sqlite3 /var/lib/vesalius/specimens.db 'select * from agent_lineage'")
     check("agent lineage reveals agent84 seed", "agent_84" in out and "Specimen #04" in out, out)
+    rc, out = await run(player, "git -C /opt/vesalius/hive-control log --oneline")
+    check("hive git history exists", "director" in out or "specimen" in out or "chamber" in out, out)
     rc, out = await run(player, "cat /opt/vesalius/ethics/consent_elena.txt")
     check("consent form exposes override derivation", "chamber_07" in out and "SHA1" in out, out)
 

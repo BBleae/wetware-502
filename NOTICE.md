@@ -1,10 +1,13 @@
-# Third-party notices
+# Third-Party Notices
 
-- This repository does **not** bundle the DeepSeek Harness (`dsh`) runtime,
-  its proprietary packages, model credentials or generated keys. The optional
-  `cage/` directory contains only the small plugin/launcher written for this
-  project; install `dsh` separately and follow its license.
-- Diagnostic images are generated at runtime from the scenario data; the
-  bundled PNG generator uses Pillow.
-- The scenario and all characters are fictional. No real medical device,
-  biological hardware or person is involved.
+## DeepSeek Harness (DSH)
+
+Integration scripts in `cage/` interface with DeepSeek Harness. The `dsh` runtime, proprietary libraries, and model API credentials are not distributed with this repository. Obtain and license `dsh` independently.
+
+## Image generation
+
+Runtime diagnostic imagery generates via Pillow (PIL).
+
+## Fictional status
+
+All machine designations, clinical files, physiological metrics, and operational incidents in this repository are fictional.

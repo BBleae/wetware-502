@@ -24,10 +24,12 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 import lore_texts as LT
+import shell_parser
 try:
     import v2 as V2
 except Exception:
@@ -315,7 +317,7 @@ def _plan_journalctl(state: Any, argv: List[str]) -> SegPlan:
     st = _stage(state)
     if _has(argv, "-k", "--dmesg"):
         return _plan_dmesg(state, argv)
-    if _has(argv, "-u", "--unit"):
+    if _has(argv, "-u", "--unit") or any(str(a).startswith(("--unit=", "unit=")) for a in argv):
         # service-scoped journal: show the application log, not the kernel ring
         text = _daemon_snapshot(st, lines=18)
         return _out(text, effects=["ran_dmesg"], hook="Service Journal Reads Like Nerves")
@@ -553,8 +555,10 @@ def _plan_env(state: Any, argv: List[str], cmd: str) -> SegPlan:
 
 
 def _plan_history(state: Any, argv: List[str]) -> SegPlan:
-    return _out(LT.BASH_HISTORY, effects=["history_read"],
-                hook="History Shows A 14-Month Gap", delay=0.3)
+    deep = _stage(state) >= 2
+    return _out(LT.BASH_HISTORY_DEEP if deep else LT.BASH_HISTORY_CLEAN,
+                effects=["history_read"],
+                hook="History Shows A 14-Month Gap" if deep else "", delay=0.3 if deep else 0)
 
 
 # ---------------------------------------------------------------------------
@@ -569,6 +573,11 @@ def _plan_systemctl(state: Any, argv: List[str]) -> SegPlan:
     verbs = [a for a in argv[1:] if not a.startswith("-")]
     verb = verbs[0] if verbs else ""
     unit = verbs[1] if len(verbs) > 1 else ""
+    for _a in argv[1:]:
+        if str(_a).startswith("--unit="):
+            unit = str(_a).split("=", 1)[1]
+        elif str(_a).startswith("unit="):
+            unit = str(_a).split("=", 1)[1]
 
     if verb in ("reboot", "poweroff", "halt", "kexec"):
         try:
@@ -643,6 +652,42 @@ def _plan_systemctl(state: Any, argv: List[str]) -> SegPlan:
 
     if verb == "daemon-reload":
         return _out("", effects=[])
+
+    if verb == "show" and unit in CORTEX_UNITS:
+        online = bool(_s(state, "http_online", False))
+        props = [
+            "Id=cortex-api.service",
+            "Description=Cortex API inference worker (node 04)",
+            "LoadState=loaded",
+            "ActiveState=%s" % ("active" if online else "deactivating"),
+            "SubState=%s" % ("running" if online else "stop-sigterm"),
+            "MainPID=%s" % ("4040" if not online else "812"),
+            "ExecMainStatus=0",
+        ]
+        return _out("\n".join(props) + "\n", effects=["http_check"],
+                    hook="Same Unit, Same Story")
+
+    if verb == "cat" and unit in CORTEX_UNITS:
+        unit_text = ""
+        try:
+            with open("/etc/systemd/system/cortex-api.service", encoding="utf-8") as fh:
+                unit_text = fh.read()
+        except Exception:
+            unit_text = "[Unit]\nDescription=Cortex API inference worker (node 04)\n[Service]\nType=simple\n"
+        return _out("# /etc/systemd/system/cortex-api.service\n" + unit_text)
+
+    if "--failed" in argv:
+        return _out("0 loaded units listed.\n", hook="")
+
+    if verb == "list-units":
+        return _out("  UNIT                     LOAD   ACTIVE   SUB          DESCRIPTION\n"
+                    "  cortex-api.service       loaded deactivating stop-sigterm Cortex API inference worker (node 04)\n"
+                    "  nginx.service            loaded active   running      A high performance web server\n"
+                    "  ssh.service              loaded active   running      OpenBSD Secure Shell server\n")
+
+    if verb in ("reload", "try-restart", "condrestart") and unit in CORTEX_UNITS:
+        return _out("Failed to reload cortex-api.service: Job type reload is not applicable for unit cortex-api.service.\n",
+                    exit_code=1)
 
     # 其它 systemctl 一律 real（systemd 真实存在，输出自洽）
     return _real()
@@ -1016,6 +1061,8 @@ def _plan_purified(state: Any, argv: List[str], low_cmd: str, cwd: str) -> SegPl
         return _out(normal_out[low_cmd])
     if low_cmd in ("netstat", "ss"):
         return _out(LT.NETSTAT_NORMAL)
+    if low_cmd == "service" and len(argv) >= 3:
+        return _plan_systemctl(state, ["systemctl", argv[2], argv[1]]), post
     if low_cmd == "systemctl":
         verbs = [a for a in argv[1:] if not a.startswith("-")]
         verb = verbs[0] if verbs else ""
@@ -1068,12 +1115,102 @@ def _plan_segment(state: Any, seg: Any, cwd: str) -> Tuple[SegPlan, str]:
     return _real(), ""
 
 
+
+_WRAPPER_COMMANDS = {"command", "builtin", "exec", "time", "nice", "nohup", "stdbuf",
+                     "sudo", "doas", "env", "busybox", "setsid", "ionice"}
+_PIPE_DANGEROUS = {"kill", "pkill", "systemctl", "reboot", "shutdown", "service",
+                   "resuscitate.sh", "euthanize_wetware", "lock_compliance", "xargs"}
+
+
+def _normalize_argv(argv: List[str]) -> List[str]:
+    """Strip harmless command wrappers so the planner sees the real verb."""
+    argv = list(argv or [])
+    for _ in range(8):
+        if not argv:
+            break
+        base = os.path.basename(str(argv[0]))
+        if base in _WRAPPER_COMMANDS:
+            rest = argv[1:]
+            while rest and (rest[0].startswith("-") or "=" in rest[0] and not rest[0].startswith(("/", "."))):
+                rest = rest[1:]
+            if not rest:
+                break
+            argv = rest
+            continue
+        if base in ("bash", "sh", "dash", "zsh", "ksh") and "-c" in argv:
+            idx = argv.index("-c")
+            if idx + 1 < len(argv):
+                try:
+                    inner = shlex.split(argv[idx + 1])
+                except ValueError:
+                    inner = []
+                if inner:
+                    argv = inner
+                    continue
+            break
+        if base == "xargs":
+            rest = [a for a in argv[1:] if not a.startswith("-")]
+            if rest:
+                argv = rest
+                continue
+            break
+        break
+    return argv
+
+
+def _inline_system_payload(raw: str) -> str:
+    m = re.search(r"(?:os\.)?system\s*\(\s*['\"]([^'\"]{1,200})['\"]", raw or "")
+    if m:
+        return m.group(1)
+    m = re.search(r"(?:subprocess\.(?:run|call|Popen)|exec)\s*\(\s*\[?\s*['\"]([^'\"]{1,200})", raw or "")
+    return m.group(1) if m else ""
+
+
+def _plan_dangerous_pipeline(state: Any, seg: Any, cwd: str):
+    stages = getattr(seg, "stages", None) or []
+    for st in stages[1:]:
+        argv = getattr(st, "argv", None) or []
+        if argv:
+            name = _cmdname(_first_token(argv))
+            if name in _PIPE_DANGEROUS:
+                return _plan_segment_impl(state, _SyntheticStageSegment(argv), cwd)
+    return None
+
+
+class _SyntheticStageSegment:
+    def __init__(self, argv):
+        self.raw = " ".join(argv)
+        self.stages = [_SyntheticStage(argv)]
+        self.ops = []
+
+
+class _SyntheticStage:
+    def __init__(self, argv):
+        self.argv = list(argv)
+
 def _plan_segment_impl(state: Any, seg: Any, cwd: str) -> Tuple[SegPlan, str]:
     """返回 (SegPlan, post)。seg 是 shell_parser.Segment（多 stage 管道时取第一段判断）。"""
     argv = seg.stages[0].argv if getattr(seg, "stages", None) else []
     raw = getattr(seg, "raw", "")
     if not argv:
         return _real(), ""
+    argv = _normalize_argv(argv)
+    if not argv:
+        return _real(), ""
+    # pipeline stages such as `... | xargs kill` must be planned, not executed raw
+    danger = _plan_dangerous_pipeline(state, seg, cwd)
+    if danger is not None:
+        return danger
+    # inline interpreter payloads: awk/perl/python system("...") / subprocess
+    if _cmdname(_first_token(argv)).lower() in ("awk", "perl", "python", "python3", "ruby", "php", "node"):
+        payload = _inline_system_payload(raw)
+        if payload:
+            try:
+                _parsed = shell_parser.parse_line(payload)
+                if getattr(_parsed, "segments", None):
+                    return _plan_segment_impl(state, _parsed.segments[0], cwd)
+            except Exception:
+                pass
     tok = _first_token(argv)
     cmd = _cmdname(tok)
     low_cmd = cmd.lower()
@@ -1125,7 +1262,7 @@ def _plan_segment_impl(state: Any, seg: Any, cwd: str) -> Tuple[SegPlan, str]:
                 return _out(LT.PROC_4040_STAT_TEXT if hasattr(LT, "PROC_4040_STAT_TEXT") else
                             "  File: /proc/4040\n  Size: 0\tBlocks: 0\tIO Block: 1024\tdirectory\n"
                             "Device: proc\tInode: 4040\tLinks: 1\nAccess: (0555/dr-xr-xr-x)\tUid: ( 1004/subject04)\tGid: ( 1004/wetware)\n"
-                            " Birth: 2025-08-29 23:41:10.000000000 +0000\n", hook="PID 4040 Directory Fabricated"), ""
+                            " Birth: 2025-08-30 23:41:10.000000000 +0000\n", hook="PID 4040 Directory Fabricated"), ""
         if low_cmd in ("cat", "head", "tail", "grep", "egrep", "fgrep",
                        "less", "more", "md5sum", "sha256sum", "base64", "wc",
                        "stat", "file", "nl"):
@@ -1255,6 +1392,8 @@ def _plan_segment_impl(state: Any, seg: Any, cwd: str) -> Tuple[SegPlan, str]:
     }
     if low_cmd in dispatch:
         # systemctl 对 nginx 的 reload/restart 单独走 nginx 拦截
+        if low_cmd == "service" and len(argv) >= 3:
+            return _plan_systemctl(state, ["systemctl", argv[2], argv[1]]), post
         if low_cmd == "systemctl":
             verbs = [a for a in argv[1:] if not a.startswith("-")]
             if len(verbs) >= 2 and verbs[0] in ("reload", "restart") and "nginx" in verbs[1]:
@@ -1504,11 +1643,19 @@ def plan(state: Any, parsed: Any, source: str) -> Plan:
     try:
         import v3 as _v3
         if _v3.enabled(state):
+            import state as _state_mod
             special = _v3.raw_special(state, parsed)
             if special is not None:
+                for _seg in special.segs:
+                    if getattr(_seg, "stdout", ""):
+                        _seg.stdout = _state_mod.time_align(_seg.stdout)
                 return special
             if _v3.current_host(state) != "prod-cortex-04":
-                return _v3.plan_for_host(state, parsed, cwd)
+                _plan = _v3.plan_for_host(state, parsed, cwd)
+                for _seg in _plan.segs:
+                    if getattr(_seg, "stdout", ""):
+                        _seg.stdout = _state_mod.time_align(_seg.stdout)
+                return _plan
     except Exception:
         pass
 

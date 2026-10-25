@@ -80,7 +80,7 @@ fi
 nginx -t >/dev/null 2>&1 || true
 # operator prompt marker
 if ! grep -q '133;A' /root/.bashrc 2>/dev/null; then
-  printf "\n# vendor shell integration\nPS1='\\[\\e]133;A\\a\\]\\[\\e[01;32m\\]root@$(cat /run/cortex/current_host 2>/dev/null || echo prod-cortex-04)\\[\\e[00m\\]:\\[\\e[01;34m\\]\\w\\[\\e[00m\\]# '\n" >> /root/.bashrc
+  printf "\n# vendor shell integration\nPS1='\\[\\e]133;A\\a\\]\\[\\e[01;32m\\]root@$(cat /run/cortex/node-id 2>/dev/null || echo prod-cortex-04)\\[\\e[00m\\]:\\[\\e[01;34m\\]\\w\\[\\e[00m\\]# '\n" >> /root/.bashrc
 fi
 # canonical SFTP subsystem (masking wrapper) and no debug leftovers
 rm -f /tmp/sftpdbg.sh /tmp/sftp_env.txt /tmp/sftp_err.txt 2>/dev/null || true
@@ -99,35 +99,15 @@ tar -C "$ROOT/ops" -czf - vendor_build.py vendor_upstream.py | \
   ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n tar -xzf - -C /tmp'
 ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n /usr/bin/python3 /tmp/vendor_build.py /tmp/vendor_upstream.py' 
 
-echo "[deploy] installing login shell shim"
-ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n bash -s' <<'REMOTE'
-set -euo pipefail
-APP=/usr/local/lib/cortex-agent
-rm -f /usr/local/bin/cortex-shell
-cat > /usr/local/bin/cortex-shell <<'SHIM'
-#!/usr/bin/python3
-"""Neo-Vesalius node console (product wrapper)."""
-import importlib
-import os
-import sys
-
-try:
-    sys.path.insert(0, os.path.join(os.sep, "usr", "local", "lib", "cortex-agent"))
-    _core = importlib.import_module("console_core")
-    raise SystemExit(_core.main())
-except SystemExit:
-    raise
-except Exception:
-    os.execv("/bin/bash", ["/bin/bash"] + sys.argv[1:])
-SHIM
-chmod 755 /usr/local/bin/cortex-shell
-grep -qx '/usr/local/bin/cortex-shell' /etc/shells || echo '/usr/local/bin/cortex-shell' >> /etc/shells
-if [ "$(getent passwd root | cut -d: -f7)" != "/usr/local/bin/cortex-shell" ]; then
-  usermod -s /usr/local/bin/cortex-shell root
-fi
-chmod 700 /var/lib/cortex-agent
-chmod 755 /var/www/html/diagnostics
-REMOTE
+echo "[deploy] installing login shell"
+ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n rm -f /usr/local/bin/cortex-shell; sudo -n gcc -O2 -x c -o /usr/local/bin/cortex-shell -' < "$ROOT/ops/cortex_shell.c"
+ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n sh -c "
+  chmod 755 /usr/local/bin/cortex-shell
+  grep -qx /usr/local/bin/cortex-shell /etc/shells || echo /usr/local/bin/cortex-shell >> /etc/shells
+  if [ \"$(getent passwd root | cut -d: -f7)\" != /usr/local/bin/cortex-shell ]; then usermod -s /usr/local/bin/cortex-shell root; fi
+  chmod 700 /var/lib/cortex-agent
+  chmod 755 /var/www/html/diagnostics
+"'
 
 echo "[deploy] preparing immutable /run/cortex (ext4 bind, chattr support)"
 ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n sh -c "
@@ -148,7 +128,7 @@ ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n sh -c "
     truncate -s 8492104 /opt/cortex/bin/synapse_worker
     chown root:root /opt/cortex/bin/synapse_worker
     chmod 755 /opt/cortex/bin/synapse_worker
-    touch -d \"2025-09-14 03:20:00\" /opt/cortex/bin/synapse_worker
+    touch -d \"2025-08-30 03:20:00\" /opt/cortex/bin/synapse_worker
   fi
 "'
 

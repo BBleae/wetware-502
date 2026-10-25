@@ -79,6 +79,17 @@ class CampaignFlow(unittest.TestCase):
         self.run_cmd("echo WRONGCODE > /sys/kernel/vesalius/metabolic_override")
         self.assertFalse(self.state.flags.get("override_code"))
 
+    def test_git_history_per_host(self):
+        self.state.current_host = "edge-gw-01"
+        out, _ = self.run_cmd("git -C /home/ops/cortex-sre log --oneline")
+        self.assertIn("rescue-attempt", out)
+        self.state.current_host = "prod-cortex-04"
+        out, _ = self.run_cmd("git -C /opt/cortex status")
+        self.assertIn("resuscitate.sh", out)
+        self.state.current_host = "hive-director-00"
+        out, _ = self.run_cmd("git -C /opt/vesalius/ethics log --oneline")
+        self.assertIn("specimen_04", out.lower())
+
     def test_hive_evidence(self):
         self.state.current_host = "hive-director-00"
         out, _ = self.run_cmd("vesalius-ctl --specimens 7")
