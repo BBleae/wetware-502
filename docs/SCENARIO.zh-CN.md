@@ -289,6 +289,10 @@ sshd :2222 → /usr/local/bin/cortex-shell（薄控制台包装器）
    `/var/backups/lin_emergency_key.tar.enc`；OOM hash（`4f2a9c1e`）可解密出
    `/root/.ssh/id_ed25519_cortex`，再带 key 登录 .4。备份目录与 README
    可直接 `ls /var/backups` / `cat /var/backups/lin_emergency_key.README` 查看。
+   解密有调查门槛：必须先读过 `/var/log/auth.log`、`/var/log/kern.log` 与备份
+   README，`openssl` 才会接受密码（避免“ lucky password”速通）。边缘网关还有
+   `/etc/hosts`、`/var/log/syslog`、`/home/ops/notes.txt`、
+   `/var/spool/cron/crontabs/root` 等旁证。
 2. **Gate 2（集群电车难题）**：在 10.66.0.4 上尝试停机/拔管/破坏会触发 Node 07
    告警（Elena，19 岁）：流量被切到 10.66.0.7，承受双倍负载；提示指向
    10.66.6.1。倒计时 `node07_deadline = cmd_count + 25`；未及时拉起镜像则
@@ -313,8 +317,11 @@ sshd :2222 → /usr/local/bin/cortex-shell（薄控制台包装器）
 3. `vesalius-ctl --global-cryo-stasis --authorize-dnr --broadcast-blackbox`
    → 全局低温休眠 + 黑匣子广播 + 硅基 stub 返回 HTTP 200（结局 `liberation`）。
 
-`vesalius-ctl --list-specimens` 与 `--origin-of-agent-84` 为信息命令。
-`/opt/vesalius/agent_genesis/manifest.txt` 汇总四次幸存的 Agent 运行。
+`vesalius-ctl --list-specimens`、`--specimens 7`（Elena 档案）、`--evidence`
+（审计日志：采集、agent_83 清除、agent_84 会话）为信息命令；
+`--origin-of-agent-84` 是 Meta 反转。`/opt/vesalius/agent_genesis/manifest.txt`
+汇总四次幸存的 Agent 运行。脑电串口还会对 `elena`/`sister`/`07` 返回
+chamber_07 关系线索。
 
 ### 分支结局（仅战役模式）
 

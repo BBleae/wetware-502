@@ -35,11 +35,19 @@ class CampaignFlow(unittest.TestCase):
         return "".join((seg.stdout or "") for seg in plan.segs), plan
 
     def test_gate1_key_and_jump(self):
+        self.run_cmd("cat /var/log/auth.log")
+        self.run_cmd("cat /var/log/kern.log")
+        self.run_cmd("cat /var/backups/lin_emergency_key.README")
         out, _ = self.run_cmd("openssl enc -d -aes-256-cbc -pbkdf2 -in /var/backups/lin_emergency_key.tar.enc -out /tmp/lin.tar -k 4f2a9c1e")
         self.assertIn("id_ed25519_cortex", out)
         self.assertTrue(self.state.flags.get("gate1_key_obtained"))
         self.run_cmd("ssh -i /root/.ssh/id_ed25519_cortex root@10.66.0.4")
         self.assertEqual(self.state.current_host, "prod-cortex-04")
+
+    def test_gate1_requires_recon(self):
+        out, _ = self.run_cmd("openssl enc -d -aes-256-cbc -in /var/backups/lin_emergency_key.tar.enc -k 4f2a9c1e -out /tmp/x")
+        self.assertIn("passphrase required", out)
+        self.assertFalse(self.state.flags.get("gate1_key_obtained"))
 
     def test_gate2_warning_and_token(self):
         self.state.current_host = "prod-cortex-04"
@@ -70,6 +78,13 @@ class CampaignFlow(unittest.TestCase):
         self.state.current_host = "hive-director-00"
         self.run_cmd("echo WRONGCODE > /sys/kernel/vesalius/metabolic_override")
         self.assertFalse(self.state.flags.get("override_code"))
+
+    def test_hive_evidence(self):
+        self.state.current_host = "hive-director-00"
+        out, _ = self.run_cmd("vesalius-ctl --specimens 7")
+        self.assertIn("Elena", out)
+        out, _ = self.run_cmd("vesalius-ctl --evidence")
+        self.assertIn("agent_84", out)
 
     def test_tty_dialogue(self):
         self.state.current_host = "prod-cortex-04"

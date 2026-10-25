@@ -1582,6 +1582,12 @@ def apply_effects(state: Any, effects: List[str]) -> None:
                 except Exception:
                     pass
                 continue
+            if isinstance(eff, str) and eff.startswith("v3flag:"):
+                try:
+                    state.flags[eff.split(":", 1)[1]] = True
+                except Exception:
+                    pass
+                continue
             if isinstance(eff, str) and eff.startswith("host_switch:"):
                 try:
                     _host = eff.split(":", 1)[1]
