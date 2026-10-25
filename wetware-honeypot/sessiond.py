@@ -49,6 +49,10 @@ try:
     import v2 as V2
 except Exception:  # pragma: no cover - v2 ships with the control plane
     V2 = None
+try:
+    import v3 as V3
+except Exception:  # pragma: no cover
+    V3 = None
 STATE_DIR = os.environ.get("WETWARE_STATE_DIR", "/var/lib/cortex-agent")
 DEV_HOME = os.environ.get("WETWARE_DEV_HOME", "")
 FS_ROOT = os.environ.get("WETWARE_FS_ROOT", "")
@@ -565,6 +569,11 @@ class Runtime:
         except Exception:
             pass
         try:
+            if V3 is not None and V3.enabled(self.state):
+                V3.after_command(self.state, line)
+        except Exception as exc:
+            hidden_log("v3 after_command failed: %r" % (exc,))
+        try:
             if V2 is not None:
                 V2.after_command(self.state, line)
         except Exception as exc:
@@ -745,7 +754,15 @@ class Runtime:
         return "Connection to prod-cortex-04 closed by remote host.\n"
 
     def finish_ending(self, kind: str, interactive: bool) -> None:
-        text = self.ending_text(kind)
+        if kind == "liberation":
+            try:
+                import v3 as _v3
+                text = _v3.HIVE_CRYO
+                self._cryo_transfer()
+            except Exception:
+                text = "The hive falls silent. 128 chambers enter cryo-stasis.\n"
+        else:
+            text = self.ending_text(kind)
         try:
             sys.stdout.buffer.write(text.encode("utf-8", "replace"))
             if not text.endswith("\n"):
@@ -1517,9 +1534,28 @@ def apply_cd(runtime: Runtime, parsed) -> tuple:
         return False, 0, ""
 
 
+def flush_pending(runtime: Runtime) -> None:
+    """Show campaign/pacing events queued by the previous command."""
+    state = runtime.state
+    try:
+        events = list(getattr(state, "pending_events", []) or [])
+    except Exception:
+        return
+    if not events:
+        return
+    try:
+        state.pending_events = []
+        state.save()
+    except Exception:
+        pass
+    for event in events:
+        write_out(event + "\n")
+
+
 def run_exec(runtime: Runtime, line: str) -> int:
     state = runtime.state
     runtime.ensure_world()
+    flush_pending(runtime)
     if state.ending and state.ending != "obedient":
         print_ending_closed(state)
         return 255

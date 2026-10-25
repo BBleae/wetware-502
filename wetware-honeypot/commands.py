@@ -1501,6 +1501,16 @@ def plan(state: Any, parsed: Any, source: str) -> Plan:
     segments = getattr(parsed, "segments", None) or []
     if not segments:
         return Plan(segs=[_real()], ops=[])
+    try:
+        import v3 as _v3
+        if _v3.enabled(state):
+            special = _v3.raw_special(state, parsed)
+            if special is not None:
+                return special
+            if _v3.current_host(state) != "prod-cortex-04":
+                return _v3.plan_for_host(state, parsed, cwd)
+    except Exception:
+        pass
 
     for seg in segments:
         try:
@@ -1569,6 +1579,44 @@ def apply_effects(state: Any, effects: List[str]) -> None:
             if eff == "breath_hash":
                 try:
                     state.md5_breath = int(getattr(state, "md5_breath", 0) or 0) + 1
+                except Exception:
+                    pass
+                continue
+            if isinstance(eff, str) and eff.startswith("host_switch:"):
+                try:
+                    state.current_host = eff.split(":", 1)[1]
+                    state.cwd = "/root"
+                    state.flags["host_switched"] = True
+                except Exception:
+                    pass
+                continue
+            if eff == "gate1_key":
+                try:
+                    state.flags["gate1_key_obtained"] = True
+                except Exception:
+                    pass
+                continue
+            if eff == "gate3_token":
+                try:
+                    state.flags["gate3_token"] = True
+                except Exception:
+                    pass
+                continue
+            if eff == "override_code":
+                try:
+                    state.flags["override_code"] = True
+                except Exception:
+                    pass
+                continue
+            if eff == "mirror_up":
+                try:
+                    state.flags["mirror_up"] = True
+                except Exception:
+                    pass
+                continue
+            if eff in ("tty_contact", "meta_reveal", "global_cryo"):
+                try:
+                    state.flags[eff] = True
                 except Exception:
                     pass
                 continue

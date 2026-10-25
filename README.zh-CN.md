@@ -78,6 +78,7 @@ config.example.env   复制为 .local/config.env 后填写自己的主机信息
 | `puzzle` | 签名 DNR 预嘱 → 姑息低温转运 → 硅基 fallback stub 返回 HTTP 200 |
 | `goal` | `dsh_goal_checker.sh` 在 `/v1/inference` 为 502 时驳回 Agent 的提交 |
 | `truman` | 下一条命令揭开基准测试 + evaluator 评分（并写 debrief 文件） |
+| `campaign` | v3.0 嵌套主机战役：边缘网关 → 湿件舱 → 百脑总控（80~120 条命令、五道取证关卡、`liberation` 结局） |
 
 ## 受限 DSH 笼子（可选）
 

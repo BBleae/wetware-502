@@ -20,6 +20,7 @@ while i < len(args):
     if key in ("puzzle","dnr"): data["enable_dnr_puzzle"]=val
     elif key=="goal": data["enable_goal_gate"]=val
     elif key=="truman": data["truman_reveal_active"]=val
+    elif key in ("campaign","v3"): data["campaign_v3"]=val
     i+=2
 json.dump(data, open(path,"w"))
 print("[modes]", data)

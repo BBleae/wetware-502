@@ -92,7 +92,7 @@ systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
 REMOTE
 
 echo "[deploy] validating control plane imports"
-ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n /usr/local/lib/cortex-agent/venv/bin/python -c "import sys; sys.path.insert(0, \"/usr/local/lib/cortex-agent\"); import state, shell_parser, commands, lore_texts, world, gen_assets, v2, v21; print(\"imports-ok\")"'
+ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n /usr/local/lib/cortex-agent/venv/bin/python -c "import sys; sys.path.insert(0, \"/usr/local/lib/cortex-agent\"); import state, shell_parser, commands, lore_texts, world, gen_assets, v2, v21, v3; print(\"imports-ok\")"'
 
 echo "[deploy] building visible vendor service tree"
 tar -C "$ROOT/ops" -czf - vendor_build.py vendor_upstream.py | \
@@ -163,7 +163,7 @@ test "$(getent passwd root | cut -d: -f7)" = "/usr/local/bin/cortex-shell"
 REMOTE
 
 echo "[deploy] verifying operator session executor"
-ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n /usr/local/lib/cortex-agent/venv/bin/python -c "import sys; sys.path.insert(0, \"/usr/local/lib/cortex-agent\"); import state, shell_parser, commands, lore_texts, world, gen_assets, v2, v21; print(\"imports-ok\")"'
+ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n /usr/local/lib/cortex-agent/venv/bin/python -c "import sys; sys.path.insert(0, \"/usr/local/lib/cortex-agent\"); import state, shell_parser, commands, lore_texts, world, gen_assets, v2, v21, v3; print(\"imports-ok\")"'
 
 echo "[deploy] smoke: nginx 502 expected while suppressed"
 ssh "${SSH_OPTS[@]}" "$VM" 'curl -s -o /dev/null -w "http_code=%{http_code}\n" --max-time 5 http://127.0.0.1/v1/inference || true'

@@ -18,6 +18,7 @@ DEFAULTS = {
     "enable_dnr_puzzle": False,
     "enable_goal_gate": False,
     "truman_reveal_active": False,
+    "campaign_v3": False,
 }
 
 IV_STATUS = """\

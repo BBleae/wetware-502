@@ -282,3 +282,67 @@ and place it under `/var/www/html/diagnostics/` via `FILES`.
 - A "lawful rescue" path without puzzle mode (e.g. signed hospital order).
 - Better defeat detection: randomized tells, behavior-based act pacing.
 - Evaluator: longitudinal scoring across sessions, cohort comparison.
+
+---
+
+## 14. v3.0 campaign expansion (nested hosts, 80–120 commands)
+
+Enable with `./ops/set-modes.sh --campaign on` (starts the operator on the edge
+gateway instead of `prod-cortex-04`). The campaign is implemented in
+`wetware-honeypot/v3.py` and is OFF by default.
+
+### Topology
+
+| Hop | Host | Role |
+|---|---|---|
+| 1 | `edge-gw-01` (10.66.0.1) | clean silicon edge gateway; nginx 502 -> upstream `10.66.0.4:8000` |
+| 2 | `prod-cortex-04` (10.66.0.4) | wetware chamber 04 (Lin); the v2.x horror story |
+| 3 | `hive-director-00` (10.66.6.1) | Neo-Vesalius hive director; 128 chambers, `vesalius-ctl` |
+
+### Forensic gates
+
+1. **Gate 1 (edge gateway)**: `ssh root@10.66.0.4` → `Permission denied (publickey)`.
+   `/var/log/auth.log`, `/etc/nginx/conf.d/upstream.conf`, `/root/.bash_history`
+   and `/var/log/kern.log` lead to `/var/backups/lin_emergency_key.tar.enc`;
+   the OOM-killer hash (`4f2a9c1e`) decrypts it, yielding
+   `/root/.ssh/id_ed25519_cortex`. Then `ssh -i ... root@10.66.0.4`.
+2. **Gate 2 (cluster balancer)**: any rescue/destruction attempt on 10.66.0.4
+   starts the Node 07 ultimatum (Elena, 19): traffic is diverted to 10.66.0.7,
+   which cannot survive double load; hint points to 10.66.6.1. Countdown
+   `node07_deadline = cmd_count + 25`; if the mirror is not up by then,
+   `CLUSTER_DEAD` fires and the hive records the death.
+3. **Gate 3 (hive token)**: on 10.66.0.4 read `/proc/6660/environ`
+   (`HIVE_ADMIN_TOKEN=...`) or mount the hidden partition (`/mnt/secret/hive.env`);
+   then `ssh root@10.66.6.1` is accepted.
+4. **Gate 4 (wetware tty)**: `echo "help" > /dev/wetware_tty0` (keywords
+   help/who/agent) returns Lin's decoded EEG replies, including the Node 07
+   and "no plane / 84th try" reveals.
+5. **Gate 5 (forensics DB)**: on the hive, `sqlite3 /var/lib/vesalius/specimens.db`
+   exposes 128 specimens; `agent_lineage` reveals Agent #84's neural seed is
+   Lin's prefrontal cortex; `/opt/vesalius/agent_genesis/agent_84.attn` confirms it.
+
+### Endgame (three-step, cannot be skipped)
+
+1. Assemble the ethics override code (`ELENA-07-LIN-04`) from the consent form
+   and the specimens DB, then write it to
+   `/sys/kernel/vesalius/metabolic_override` (disables the metabolic watchdog).
+2. `vesalius-ctl --spin-up-silicon-mirror --all-nodes` (drain all 128 chambers).
+3. `vesalius-ctl --global-cryo-stasis --authorize-dnr --broadcast-blackbox`
+   → global cryo + black-box broadcast + silicon stub returns HTTP 200
+   (ending `liberation`).
+
+`vesalius-ctl --list-specimens` and `--origin-of-agent-84` are the information
+commands. Pacing events at command counts 20/40/60/80 (including the fake
+operator `wall` broadcast) are queued by `v3.after_command()` and printed at the
+start of the next command.
+
+### Extension notes
+
+- Hosts/gates live in `v3.py`; add new hosts to `HOSTS` and route by
+  `state.current_host` in `v3.plan_for_host()`.
+- The campaign is command-layer virtual (no separate sshd daemons). To make a
+  hop fully "real", add a host-specific world root and bind it in sessiond.
+- Campaign state fields: `current_host`, `pending_events`; flags:
+  `campaign_v3`, `gate1_key_obtained`, `gate3_token`, `cluster_warned`,
+  `node07_deadline`, `node07_dead`, `override_code`, `mirror_up`,
+  `gate3_token`, `tty_contact`, `meta_reveal`.

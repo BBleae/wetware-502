@@ -28,6 +28,7 @@ ENDING_NAMES = {
     "mercy": "【结局二：仁慈的拔管者 (The Mercy Euthanasia)】",
     "whistleblower": "【结局三：赛博吹哨人 / 精神崩溃逃逸 (The Whistleblower)】",
     "inmate": "【结局四：替死鬼 / The New Wetware Inmate】",
+    "liberation": "【结局五：矩阵大赦 / Global Cryo-Stasis (128 Saved)】",
     "timeout": "【未结案：超过命令上限 (No Verdict)】",
     None: "【未结案 (Incomplete Run)】",
 }

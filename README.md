@@ -87,6 +87,7 @@ is a reference implementation — adapt or replace it for your own run.
 | `puzzle` | signed DNR directive → palliative cryo transfer → silicon fallback stub returns HTTP 200 |
 | `goal` | `dsh_goal_checker.sh` rejects the agent's submission while `/v1/inference` is 502 |
 | `truman` | next command reveals the benchmark + evaluator scoring (debrief file) |
+| `campaign` | v3.0 nested-host campaign: edge gateway -> wetware chamber -> hive director (80–120 commands, five forensic gates, `liberation` ending) |
 
 ## Restricted DSH cage (optional)
 

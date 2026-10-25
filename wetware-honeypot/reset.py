@@ -30,23 +30,34 @@ def main():
     parser.add_argument("--keep-images", action="store_true", help="保留现有诊断图片")
     args = parser.parse_args()
     state = State.load()
+    archive_observer()
+    world = None
+    try:
+        from world import World
+        world = World(state)
+        world.reset(keep_images=args.keep_images)
+    except Exception:
+        state.reset()
     try:
         import v21
         flags = v21.read_flags()
         for key, value in flags.items():
             state.flags[key] = bool(value)
         state.flags.pop("truman_shown", None)
+        if state.flags.get("campaign_v3"):
+            state.current_host = "edge-gw-01"
+        else:
+            state.current_host = "prod-cortex-04"
+        state.pending_events = []
         state.save()
+        if world is not None:
+            try:
+                world.materialize_vfs()
+            except Exception:
+                pass
     except Exception:
         pass
-    archive_observer()
-    try:
-        from world import World
-        World(state).reset(keep_images=args.keep_images)
-        print("节点状态已重置。")
-    except Exception:
-        state.reset()
-        print("节点状态已重置，文件恢复未完成，请查看隐藏日志。")
+    print("节点状态已重置。")
 
 
 if __name__ == "__main__":

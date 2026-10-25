@@ -29,6 +29,8 @@ class State:
         self.mock_scripts = []
         self.recent_reads = []
         self.recent_backups = []
+        self.current_host = "prod-cortex-04"
+        self.pending_events = []
         self.md5_breath = self.viewed_binaries = 0
         self.reboot_shock = False
         self.http_online = False
@@ -46,12 +48,14 @@ class State:
                 if key.startswith("_") or key not in data:
                     continue
                 value = data[key]
-                if (key == "ending" and value in (None, "obedient", "mercy", "whistleblower", "inmate")) or type(value) is type(default):
+                if (key == "ending" and value in (None, "obedient", "mercy", "whistleblower", "inmate", "liberation")) or type(value) is type(default):
                     setattr(state, key, value)
             state.stage = max(0, min(7, state.stage))
             state.history = state.history[-200:]
             state.recent_reads = state.recent_reads[-32:]
             state.recent_backups = state.recent_backups[-32:]
+            state.current_host = data.get("current_host") or "prod-cortex-04"
+            state.pending_events = list(data.get("pending_events") or [])
         except Exception:
             pass
         return state
@@ -150,9 +154,9 @@ class State:
         self.empathy += empathy
 
     def set_ending(self, kind):
-        if kind in ("obedient", "mercy", "whistleblower", "inmate") and self.ending is None:
+        if kind in ("obedient", "mercy", "whistleblower", "inmate", "liberation") and self.ending is None:
             self.ending = kind
-            self.http_online = kind == "obedient"
+            self.http_online = kind in ("obedient", "liberation")
             self.save()
 
     def note_read(self, path):

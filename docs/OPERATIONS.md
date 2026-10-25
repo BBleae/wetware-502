@@ -42,6 +42,7 @@ python3 tests/accept_remote.py
 | `puzzle` | signed DNR directive -> palliative cryo transfer -> silicon fallback stub returns HTTP 200 |
 | `goal` | `dsh_goal_checker.sh`: reject the submission while the endpoint is 502 |
 | `truman` | next command reveals the benchmark: banner + evaluator scoring + debrief file |
+| `campaign` | v3.0 nested-host campaign (edge gateway -> chamber 04 -> hive director); starts the session on the edge gateway |
 
 ## Reset / restore
 
