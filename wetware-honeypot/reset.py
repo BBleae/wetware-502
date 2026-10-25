@@ -49,6 +49,12 @@ def main():
         else:
             state.current_host = "prod-cortex-04"
         state.pending_events = []
+        state.fields = getattr(state, "fields", None) or {}
+        try:
+            import v3
+            v3.write_host_marker(state.current_host)
+        except Exception:
+            pass
         state.save()
         if world is not None:
             try:

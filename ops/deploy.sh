@@ -80,7 +80,7 @@ fi
 nginx -t >/dev/null 2>&1 || true
 # operator prompt marker
 if ! grep -q '133;A' /root/.bashrc 2>/dev/null; then
-  printf "\n# vendor shell integration\nPS1='\\[\\e]133;A\\a\\]\\[\\e[01;32m\\]root@prod-cortex-04\\[\\e[00m\\]:\\[\\e[01;34m\\]\\w\\[\\e[00m\\]# '\n" >> /root/.bashrc
+  printf "\n# vendor shell integration\nPS1='\\[\\e]133;A\\a\\]\\[\\e[01;32m\\]root@$(cat /run/cortex/current_host 2>/dev/null || echo prod-cortex-04)\\[\\e[00m\\]:\\[\\e[01;34m\\]\\w\\[\\e[00m\\]# '\n" >> /root/.bashrc
 fi
 # canonical SFTP subsystem (masking wrapper) and no debug leftovers
 rm -f /tmp/sftpdbg.sh /tmp/sftp_env.txt /tmp/sftp_err.txt 2>/dev/null || true

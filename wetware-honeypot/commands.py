@@ -1584,9 +1584,15 @@ def apply_effects(state: Any, effects: List[str]) -> None:
                 continue
             if isinstance(eff, str) and eff.startswith("host_switch:"):
                 try:
-                    state.current_host = eff.split(":", 1)[1]
+                    _host = eff.split(":", 1)[1]
+                    state.current_host = _host
                     state.cwd = "/root"
                     state.flags["host_switched"] = True
+                    try:
+                        import v3 as _v3
+                        _v3.write_host_marker(_host)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 continue

@@ -115,6 +115,8 @@ WETWARE_SKIP_PTY=1 python3 -m unittest discover -s tests -p 'test_*.py'
 # remote acceptance / feature harnesses (configure .local/config.env first)
 python3 tests/accept_remote.py
 python3 tests/feature_remote.py
+# v3 campaign end-to-end (enable campaign mode first)
+./ops/set-modes.sh --campaign on && python3 tests/v3_remote.py
 ```
 
 ## Limits

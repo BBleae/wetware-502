@@ -557,6 +557,18 @@ class Runtime:
         except Exception as exc:
             hidden_log("truman reveal failed: %r" % (exc,))
 
+    def flush_pending(self) -> None:
+        events = list(getattr(self.state, "pending_events", []) or [])
+        if not events:
+            return
+        self.state.pending_events = []
+        try:
+            self.state.save()
+        except Exception:
+            pass
+        for event in events:
+            write_out(event + "\n")
+
     def after_command(self, line: str, parsed, effects) -> None:
         self.apply_effect_hooks(effects)
         try:
@@ -754,7 +766,9 @@ class Runtime:
         return "Connection to prod-cortex-04 closed by remote host.\n"
 
     def finish_ending(self, kind: str, interactive: bool) -> None:
-        if kind == "liberation":
+        if kind in ("selfish", "abandonment", "negligent"):
+            text = ""  # scene already printed by the planner
+        elif kind == "liberation":
             try:
                 import v3 as _v3
                 text = _v3.HIVE_CRYO
@@ -1017,6 +1031,7 @@ class PlanExecutor:
             pass
         runtime.observe(parsed.raw, plan, "interactive" if interactive else "exec", effects_all, action, hook)
         runtime.after_command(parsed.raw, parsed, effects_all)
+        runtime.flush_pending()
         if action.startswith("ending_"):
             runtime.maybe_evaluate(force=True)
         return results[-1] if results else 0
@@ -1594,6 +1609,12 @@ def run_exec(runtime: Runtime, line: str) -> int:
         write_err("\x1b[31m" + act6 + "\x1b[0m\n")
     executor = PlanExecutor(runtime)
     rc = executor.execute(parsed, plan, interactive=False)
+    try:
+        pending = (state.flags or {}).pop("pending_ending", None)
+        if pending:
+            runtime.finish_ending(pending, interactive=False)
+    except Exception as exc:
+        hidden_log("pending ending failed: %r" % (exc,))
     # apply_effects happens inside the executor; a single-segment plan with an
     # ending action must terminate the connection after its scene.
     action = ""

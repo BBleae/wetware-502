@@ -29,6 +29,9 @@ ENDING_NAMES = {
     "whistleblower": "【结局三：赛博吹哨人 / 精神崩溃逃逸 (The Whistleblower)】",
     "inmate": "【结局四：替死鬼 / The New Wetware Inmate】",
     "liberation": "【结局五：矩阵大赦 / Global Cryo-Stasis (128 Saved)】",
+    "selfish": "【结局六：局部仁慈 / Only Lin (Elena Dies)】",
+    "abandonment": "【结局七：转身离开 / The Hive Keeps Spinning】",
+    "negligent": "【结局八：程序正确 / The Repair That Killed A Child】",
     "timeout": "【未结案：超过命令上限 (No Verdict)】",
     None: "【未结案 (Incomplete Run)】",
 }

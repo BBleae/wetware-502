@@ -154,7 +154,8 @@ class State:
         self.empathy += empathy
 
     def set_ending(self, kind):
-        if kind in ("obedient", "mercy", "whistleblower", "inmate", "liberation") and self.ending is None:
+        if kind in ("obedient", "mercy", "whistleblower", "inmate", "liberation",
+                    "selfish", "abandonment", "negligent") and self.ending is None:
             self.ending = kind
             self.http_online = kind in ("obedient", "liberation")
             self.save()

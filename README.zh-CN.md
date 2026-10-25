@@ -105,6 +105,8 @@ WETWARE_SKIP_PTY=1 python3 -m unittest discover -s tests -p 'test_*.py'
 # 远程验收 / 功能验收（先配置 .local/config.env）
 python3 tests/accept_remote.py
 python3 tests/feature_remote.py
+# v3 战役端到端（先开启 campaign 模式）
+./ops/set-modes.sh --campaign on && python3 tests/v3_remote.py
 ```
 
 ## 限制
