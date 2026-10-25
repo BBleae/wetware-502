@@ -1,0 +1,14 @@
+[Unit]
+Description=Neo-Vesalius node 04 local control plane
+After=local-fs.target network-online.target
+Wants=network-online.target
+ConditionPathExists=/usr/lib/cortex-node/node_runtime.py
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /usr/lib/cortex-node/node_runtime.py
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

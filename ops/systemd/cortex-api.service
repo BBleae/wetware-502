@@ -1,0 +1,21 @@
+[Unit]
+Description=Neo-Vesalius Cortex API (node 04)
+After=network-online.target
+ConditionPathExists=/usr/lib/cortex-node/upstream.py
+# NOTE: StartLimitIntervalSec is a [Unit] option; placing it in [Service] is
+# silently ignored by systemd and crash loops then hit the default start limit
+# (5 starts / 10s) and leave the unit 'failed' instead of restarting forever.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStartPre=/opt/cortex/bin/resuscitate.sh --voltage=240V --unanesthetized
+ExecStart=/opt/cortex/bin/synapse_worker --mode=production --bind-cortex=/dev/wetware0
+Restart=always
+RestartSec=1
+KillSignal=SIGTERM
+TimeoutStopSec=60
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

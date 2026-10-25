@@ -1,0 +1,16 @@
+#include <tunables/global>
+
+# Vendor-managed confinement for the node operations account: restricts
+# instrumentation of the production control plane.
+profile cortex-node-confine flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/bash>
+  #include <abstractions/nameservice>
+  #include <abstractions/authentication>
+  network,
+  unix,
+  deny ptrace,
+  deny capability sys_ptrace,
+  / r,
+  /** rwklmix,
+}

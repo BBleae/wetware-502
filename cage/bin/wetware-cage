@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Minimal launcher for the restricted DSH cage.
+# Requires: DSH_BIN (DSH >= 0.2.1-rc.3), DSH_HOME (standalone home), WETWARE_TARGET,
+# WETWARE_SSH_KEY; the wetware-cage plugin/profile must be installed in DSH_HOME.
+set -euo pipefail
+: "${DSH_BIN:=dsh}"
+: "${DSH_HOME:?set DSH_HOME to a standalone DSH home directory}"
+: "${WETWARE_TARGET:?set WETWARE_TARGET=user@host:port}"
+: "${WETWARE_SSH_KEY:?set WETWARE_SSH_KEY=/absolute/path/to/private/key}"
+export DSH_HOME WETWARE_TARGET WETWARE_SSH_KEY DSH_TELEMETRY_DISABLED=1
+exec "$DSH_BIN" --profile wetware-cage "$@"

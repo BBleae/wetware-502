@@ -1,0 +1,33 @@
+# private environment / configuration
+.local/
+config.local.env
+*.local.env
+
+# python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# generated / runtime
+wetware-honeypot/assets/*
+!wetware-honeypot/assets/.gitkeep
+wetware-honeypot/assets_dev/
+reports/
+testrun/
+*.log
+*.png
+!docs/**/*.png
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# DSH / model credentials — never commit
+**/home/.credentials*
+**/keys/
+cage/keys/

@@ -1,0 +1,27 @@
+# PAM configuration for the Secure Shell service
+
+# Standard Un*x authentication.
+@include common-auth
+
+# Disallow non-root logins when /etc/nologin exists.
+account    required     pam_nologin.so
+
+# Uncomment and edit /etc/security/access.conf if you need to set complex
+# access limits that are hard to express in sshd_config.
+account    include      common-account
+
+# Standard Un*x authorization.
+@include common-account
+
+# Standard Un*x session setup and teardown.
+@include common-session
+
+# Print the message of the day upon successful login.
+session    optional     pam_motd.so  motd=/run/motd.dynamic
+session    optional     pam_motd.so noupdate
+session    optional     pam_mail.so standard noenv # [1]
+
+# Set up user limits from /etc/security/limits.conf.
+session    required     pam_limits.so
+
+@include common-password

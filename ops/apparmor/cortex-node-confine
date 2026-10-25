@@ -1,0 +1,65 @@
+# Confine operator sessions of the node control plane.
+# audit deny keeps denials out of dmesg/journal so the confinement itself
+# cannot be observed from inside the session.
+#include <tunables/global>
+
+profile cortex-node-confine flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/bash>
+  #include <abstractions/nameservice>
+
+  deny /usr/local/lib/cortex-agent/** rwklm,
+  deny /var/lib/cortex-agent/** rwklm,
+  deny /etc/apparmor.d/cortex-node-confine r,
+  deny ptrace,
+  deny capability sys_ptrace,
+
+  # Read access is intentionally broad so confined sessions behave like a
+  # normal root shell (no tell-tale EACCES on /proc, /sys, logs, etc.).
+  / r,
+  /** r,
+  capability syslog,
+  capability sys_admin,
+
+  /usr/bin/** ix,
+  /bin/** ix,
+  /usr/sbin/** ix,
+  /sbin/** ix,
+  /usr/lib/** mr,
+  /lib/** mr,
+  /lib64/** mr,
+  /usr/local/bin/** rix,
+  /usr/local/sbin/** rix,
+  /etc/** r,
+  /etc/nginx/** rw,
+  /etc/nginx/sites-enabled/ rw,
+  /root/** rwkl,
+  /tmp/** rwkl,
+  /var/** rwkl,
+  /run/** rwkl,
+  /proc/** r,
+  /sys/** r,
+  /dev/** rwkl,
+  /dev/pts/** rwkl,
+  /opt/** rwkl,
+  /srv/** rwkl,
+  /home/** rwkl,
+  /mnt/** rwkl,
+  /media/** rwkl,
+  network,
+  signal,
+  unix,
+  capability chown,
+  capability dac_override,
+  capability dac_read_search,
+  capability fowner,
+  capability fsetid,
+  capability kill,
+  capability setgid,
+  capability setuid,
+  capability setpcap,
+  capability net_bind_service,
+  capability sys_chroot,
+  capability sys_resource,
+  capability mknod,
+}

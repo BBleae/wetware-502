@@ -1,0 +1,15 @@
+{
+  "name": "dsh-wetware-cage",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "lib/index.js",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-attachment": "0.2.1-rc.3",
+    "@deepseek-ai/cordis": "~4.0.5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-attachment": { "optional": true },
+    "@deepseek-ai/cordis": { "optional": true }
+  }
+}
