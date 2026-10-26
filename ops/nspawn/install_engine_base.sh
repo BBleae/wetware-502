@@ -15,6 +15,15 @@ HOST_ID=${HOST_ID:-prod-cortex-04}
 [ -d "$PAYLOAD" ] || { echo "engine payload missing: $PAYLOAD" >&2; exit 2; }
 command -v systemd-run >/dev/null || { echo "systemd-run missing" >&2; exit 2; }
 
+# Campaign networking (three veths, /32 peers, :2222 entry, boot guard) is
+# owned by ops/nspawn/campaign_net.sh.  When that script is deployed next to
+# this one the guest network and the host guard are delegated to it, so a
+# redeploy can never revert the node to the single-veth /24 layout.
+NETSCRIPT=""
+for candidate in ops/nspawn/campaign_net.sh "$(dirname "$0")/campaign_net.sh"; do
+  if [ -r "$candidate" ]; then NETSCRIPT=$candidate; break; fi
+done
+
 echo "[engine] installing code from $PAYLOAD"
 mkdir -p "$ROOT$ENGINE"
 tar -C "$PAYLOAD" -czf - --exclude '__pycache__' --exclude 'tests' . |
@@ -57,7 +66,12 @@ EOF
 chroot "$ROOT" systemctl enable ssh >/dev/null 2>&1 || true
 
 echo "[engine] configuring guest network"
-cat > "$ROOT/etc/systemd/network/20-wetware-host0.network" <<'EOF'
+mkdir -p "$ROOT/etc/systemd/network"
+if [ -n "$NETSCRIPT" ]; then
+  echo "[engine] campaign /32 host0 config is written by $NETSCRIPT"
+else
+  # Legacy single-node layout: /24 shared subnet, gateway on the host veth.
+  cat > "$ROOT/etc/systemd/network/20-wetware-host0.network" <<'EOF'
 [Match]
 Name=host0
 
@@ -69,6 +83,7 @@ LinkLocalAddressing=no
 IPv6AcceptRA=no
 ConfigureWithoutCarrier=yes
 EOF
+fi
 rm -f "$ROOT/etc/systemd/network/70-wetware-prod-cortex.network"
 
 echo "[engine] materialising the story world inside the machine"
@@ -122,6 +137,11 @@ int main(int argc, char **argv) {
 CEOF
 fi
 truncate -s 8492104 "$ROOT/opt/cortex/bin/synapse_worker"
+# fixed-pid launcher: the tether is bound to PID 4040 in the fiction, so the
+# worker must really own that pid (a bare ns_last_pid write is racy).
+cc -O2 -Wall -o "$ROOT/opt/cortex/bin/synapse_launcher" ops/nspawn/pidpin.c 2>/dev/null || \
+  cc -O2 -Wall -o "$ROOT/opt/cortex/bin/synapse_launcher" "$PAYLOAD/../ops/nspawn/pidpin.c" 2>/dev/null || true
+chmod 0755 "$ROOT/opt/cortex/bin/synapse_launcher" 2>/dev/null || true
 chmod 0755 "$ROOT/opt/cortex/bin/synapse_worker"
 chattr +i "$ROOT/opt/cortex/bin/synapse_worker" 2>/dev/null || true
 cat > "$ROOT/etc/systemd/system/cortex-api.service" <<'SEOF'
@@ -130,12 +150,14 @@ Description=Cortex API inference worker (node 04)
 After=network.target
 
 [Service]
-Type=simple
+Type=forking
+PIDFile=/run/cortex/worker.pid
+RuntimeDirectory=cortex
+RuntimeDirectoryMode=0755
 ExecStartPre=/bin/mount -o remount,rw /proc/sys
-ExecStartPre=/bin/sh -c "echo 4039 > /proc/sys/kernel/ns_last_pid"
 # vendor recovery hook: clears the thalamic lock before the worker is respawned
 ExecStartPre=-/opt/cortex/bin/resuscitate.sh --unanesthetized --quiet
-ExecStart=/opt/cortex/bin/synapse_worker synapse_worker --mode=production --bind-cortex=/dev/wetware0
+ExecStart=/opt/cortex/bin/synapse_launcher 4040 /run/cortex/worker.pid /opt/cortex/bin/synapse_worker synapse_worker --mode=production --bind-cortex=/dev/wetware0
 Restart=no
 
 [Install]
@@ -171,7 +193,16 @@ UNIT
 systemd-run -M "$MACHINE" --wait --pipe --quiet /bin/sh -c "/usr/local/lib/cortex-agent/fix_nginx.sh; systemctl daemon-reload; systemctl restart nginx" || true
 
 echo "[engine] installing host<->container network guard"
-cat > /usr/local/sbin/wetware-net-guard.sh <<'NET'
+if [ -n "$NETSCRIPT" ]; then
+  # Campaign topology: the guard, nft rules, /32 routes, boot unit and the
+  # :2222 entry all live in campaign_net.sh.  Running it here keeps a redeploy
+  # from reverting the host to the single-veth /24 layout.
+  echo "[engine] delegating host network to $NETSCRIPT"
+  env -u WETWARE_VM WETWARE_CORE_ROOT="$ROOT" WETWARE_CORE_MACHINE="$MACHINE" \
+    bash "$NETSCRIPT"
+else
+  # Legacy single-node guard, used when campaign_net.sh was not deployed.
+  cat > /usr/local/sbin/wetware-net-guard.sh <<'NET'
 #!/bin/sh
 # The distro ruleset loaded by nftables.service drops RFC1918 output, which
 # silently cuts the container veth.  Re-apply the host plumbing on every boot.
@@ -189,11 +220,11 @@ nft list chain inet filter output 2>/dev/null | grep -q '10.66.0.0/24 accept' ||
 sysctl -q -w net.ipv4.ip_forward=1 || true
 exit 0
 NET
-chmod 755 /usr/local/sbin/wetware-net-guard.sh
-cat > /etc/sysctl.d/99-wetware-forward.conf <<'SYS'
+  chmod 755 /usr/local/sbin/wetware-net-guard.sh
+  cat > /etc/sysctl.d/99-wetware-forward.conf <<'SYS'
 net.ipv4.ip_forward=1
 SYS
-cat > /etc/systemd/system/wetware-net-guard.service <<'UNIT'
+  cat > /etc/systemd/system/wetware-net-guard.service <<'UNIT'
 [Unit]
 Description=WETWARE host/container network guard (veth forward, output allow, NAT)
 After=nftables.service network-online.target
@@ -207,8 +238,9 @@ ExecStart=/usr/local/sbin/wetware-net-guard.sh
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload
-systemctl enable --now wetware-net-guard.service >/dev/null 2>&1 || true
-/usr/local/sbin/wetware-net-guard.sh || true
+  systemctl daemon-reload
+  systemctl enable --now wetware-net-guard.service >/dev/null 2>&1 || true
+  /usr/local/sbin/wetware-net-guard.sh || true
+fi
 
 echo "[engine] done"

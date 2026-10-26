@@ -407,7 +407,7 @@ RequiresMountsFor=$ROOTFS
 
 [Service]
 Type=notify
-ExecStart=/usr/bin/systemd-nspawn --quiet --keep-unit --link-journal=try-guest --network-veth --machine=$MACHINE_NAME --directory=$ROOTFS /sbin/init
+ExecStart=/usr/bin/systemd-nspawn --quiet --keep-unit --link-journal=try-guest --network-veth --machine=$MACHINE_NAME --bind=/var/lib/wetware-campaign/state:/var/lib/cortex-agent --directory=$ROOTFS /sbin/init
 KillMode=mixed
 SuccessExitStatus=133
 Slice=machine.slice

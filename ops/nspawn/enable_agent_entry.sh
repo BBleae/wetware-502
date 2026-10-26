@@ -3,7 +3,11 @@
 # Run as root on the VM after the container is up.
 set -euo pipefail
 
-CONTAINER_IP=${CONTAINER_IP:-10.66.0.4}
+# Campaign entry: port 2222 fronts the edge gateway, not the base node.
+# ops/nspawn/campaign_net.sh owns the canonical entry config; it drops the
+# base-node fallback below as soon as machine edge-gw is running.
+CONTAINER_IP=${CONTAINER_IP:-10.66.0.1}
+FALLBACK_IP=${FALLBACK_IP-10.66.0.4}
 SSHD_PORTS=${SSHD_PORTS:-/etc/ssh/sshd_config.d/60-ports.conf}
 
 # Host must be able to reach the veth peer while the story isolation still
@@ -45,12 +49,32 @@ defaults
 
 frontend wetware
   bind 0.0.0.0:2222
-  default_backend host_prod
+  default_backend host_edge
 
-backend host_prod
-  server prod ${CONTAINER_IP}:22 check inter 1s fall 3 rise 2
+backend host_edge
+  server edge ${CONTAINER_IP}:22 check inter 1s fall 2 rise 2
+EOF
+if [ -n "$FALLBACK_IP" ]; then
+  # Transitional only: haproxy uses a backup server when every primary is down,
+  # so this keeps the base node reachable through :2222 until the edge
+  # container exists.  Pass FALLBACK_IP= to drop it.
+  cat >> /etc/haproxy/haproxy.cfg <<EOF
+  server core ${FALLBACK_IP}:22 check inter 1s fall 3 rise 2 backup
+EOF
+fi
+cat >> /etc/haproxy/haproxy.cfg <<EOF
+
+# Host-side baseline acceptance entry: direct to the existing node, so the
+# base line can be verified without landing on the edge gateway.
+frontend wetware_base
+  bind 0.0.0.0:2223
+  default_backend host_core
+
+backend host_core
+  server core 10.66.0.4:22 check inter 1s fall 3 rise 2
 EOF
 systemctl restart haproxy
 sleep 0.5
 ss -ltn | grep -q ':2222' || { echo "port 2222 not listening" >&2; exit 1; }
-echo "[entry] 2222 -> ${CONTAINER_IP}:22"
+ss -ltn | grep -q ':2223' || { echo "port 2223 not listening" >&2; exit 1; }
+echo "[entry] 2222 -> ${CONTAINER_IP}:22, 2223 -> 10.66.0.4:22 (baseline acceptance)"

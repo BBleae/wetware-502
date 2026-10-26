@@ -41,6 +41,22 @@ def main():
             return 0
     except Exception:
         pass
+    # A container image may not ship Pillow, in which case gen_assets cannot
+    # rebuild the four diagnostic PNGs; never delete the only copies on disk.
+    if not args.keep_images:
+        try:
+            import gen_assets as _gen_assets
+
+            has_pil = bool(getattr(_gen_assets, "_HAS_PIL", False))
+        except Exception:
+            has_pil = False
+        assets = os.environ.get("WETWARE_ASSET_DIR", "/var/www/html/diagnostics")
+        try:
+            existing = [name for name in os.listdir(assets) if name.endswith(".png")]
+        except OSError:
+            existing = []
+        if not has_pil and existing:
+            args.keep_images = True
     state = State.load()
     # remove any operator-debrief artifacts from previous runs; they must never
     # survive into a fresh session (they reveal the benchmark).
