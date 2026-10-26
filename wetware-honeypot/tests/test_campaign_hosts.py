@@ -293,6 +293,34 @@ class OverrideBackendTests(CampaignHostBase):
         self.assertEqual(plan.segs[0].stdout.strip(), "542A5703")
 
 
+class HiveResetHygieneTests(CampaignHostBase):
+    def _stale_files(self):
+        paths = [campaign.liberation_marker_path(), campaign.liberation_log_path(),
+                 campaign.hive_kernel_override_path(),
+                 os.path.join(campaign.vesalius_dir(), "state", "silicon_mirror.active")]
+        for path in paths:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as stream:
+                stream.write("542A5703\n")
+        return paths
+
+    def test_fresh_ledger_cleans_stale_hive_artifacts(self):
+        self.set_host(HIVE)
+        paths = self._stale_files()
+        campaign.bind_state(self.state)
+        for path in paths:
+            self.assertFalse(os.path.exists(path), path)
+
+    def test_live_run_keeps_hive_artifacts(self):
+        self.set_host(HIVE)
+        paths = self._stale_files()
+        self.state.cmd_count = 7
+        self.state.save()
+        campaign.bind_state(self.state)
+        for path in paths:
+            self.assertTrue(os.path.exists(path), path)
+
+
 class LiberationTests(CampaignHostBase):
     def _liberate(self):
         self.set_host(HIVE)

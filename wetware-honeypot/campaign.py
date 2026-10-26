@@ -191,6 +191,11 @@ def bind_state(state) -> str:
     ``state.current_host`` stays session metadata for the observer/evaluator;
     the v3 planner resolves the host from the node-id file in a real deployment,
     so a sibling session cannot move this session to another role.
+
+    The hive's endgame artefacts live on the hive's own filesystem (the shared
+    reset cannot reach them).  When the shared ledger is brand-new (stage 0, no
+    ending, no override) the first hive session clears stale local remnants from
+    a previous run so a fresh play state is really fresh.
     """
     host = local_host()
     try:
@@ -202,7 +207,42 @@ def bind_state(state) -> str:
             state.flags["campaign_v3"] = True
         except Exception:
             pass
+    if host == HIVE_HOST:
+        try:
+            clean_stale_hive_state(state)
+        except Exception:
+            pass
     return host
+
+
+def clean_stale_hive_state(state=None) -> bool:
+    """Remove a previous run's hive-local endgame artefacts after a fresh reset.
+
+    Only acts when the shared ledger is empty: a live run (stage/commands/
+    ending/override present) is never touched.
+    """
+    data = read_state_json()
+    try:
+        fresh = (int(data.get("stage", 0) or 0) == 0
+                 and int(data.get("cmd_count", 0) or 0) == 0
+                 and not data.get("ending")
+                 and not data.get("http_online"))
+    except Exception:
+        fresh = False
+    if not fresh or _read_text(override_path()):
+        return False
+    removed = False
+    stale = (liberation_marker_path(), liberation_log_path(),
+             hive_kernel_override_path(),
+             os.path.join(vesalius_dir(), "state", "silicon_mirror.active"))
+    for path in stale:
+        try:
+            if os.path.lexists(path):
+                os.unlink(path)
+                removed = True
+        except OSError:
+            continue
+    return removed
 
 
 def reload_state(state) -> bool:
