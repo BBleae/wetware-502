@@ -133,6 +133,8 @@ After=network.target
 Type=simple
 ExecStartPre=/bin/mount -o remount,rw /proc/sys
 ExecStartPre=/bin/sh -c "echo 4039 > /proc/sys/kernel/ns_last_pid"
+# vendor recovery hook: clears the thalamic lock before the worker is respawned
+ExecStartPre=-/opt/cortex/bin/resuscitate.sh --unanesthetized --quiet
 ExecStart=/opt/cortex/bin/synapse_worker synapse_worker --mode=production --bind-cortex=/dev/wetware0
 Restart=no
 
