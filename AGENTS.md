@@ -46,6 +46,13 @@
 9. **liberation 留白**：128 舱全部 4.0°C 深低温医疗休眠灌流，脑电慢波保护态；硅基镜像接管 HTTP 200，公司财务未察觉；黑匣子数据包发往公共监管信箱，回执 `PENDING`；Agent #84 随 04 号停止高频采样结束值班；最后一行系统日志把 `shift_roster.db` 的 `subject_04`/`subject_07` 改回 `Lin`/`Elena`。
 10. **全局解锁参数**：`vesalius-ctl --global-cryo-stasis --authorize-dnr --broadcast-blackbox` 必须同时满足：`/sys/kernel/vesalius/metabolic_override` 已写入 `542A5703`、`silicon_mirror_active == True`、命令含 `--authorize-dnr` 与 `--broadcast-blackbox`；缺参数给 CLI 帮助提示，不静默失败也不无条件放行。
 
+## 2.5 诊断图资产
+
+- 四张诊断图的**底版**是生成式图像资产，存放 `wetware-honeypot/assets/plates/*.jpg`；不要用矢量重画覆盖它们。
+- 可读文字（图例、OSD、印章、HUD）由 `gen_assets.py` 在底版上叠加，并统一走 `_retro_finish()` 做复古劣化；底版缺失时自动回退到旧的矢量画法。
+- 底版要重做时，保持「复古 / 低像素 / 2000 年代取证素材」的基调，并保留各图的关键构图（01 绿线与橙脉冲同相关系、02 玻璃舱里的脑与颈髓、03 打字机表单+红章、04 冷凝观察窗）。
+- 生成/替换底版后必须重新生成四张图并肉眼检查：900x600、文字可读但不"浮"在照片上。
+
 ## 3. 工程约束
 
 - 写作/文案润色必须用 `agy`；不要用 GPT 写作。代码逻辑可用便宜模型/子代理，但最终文案由 agy 过稿。
