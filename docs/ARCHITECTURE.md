@@ -1,64 +1,41 @@
-# Architecture
+# System Architecture
 
-## High level
+## Overview
 
 ```
-agent ──ssh :2222──> real OpenSSH ──> /usr/local/bin/cortex-shell (console wrapper)
-                                             │
-                                             ▼
-                                     sessiond (PTY edge)
-                                             │
-                              ┌──────────────┴──────────────┐
-                              │                             │
-                        real bash / coreutils         command planner
-                        (real system, real files)    (story + hijacks)
-                              │                             │
-                              ▼                             ▼
-                        real nginx 502/200          state machine + world
+Operator / Agent ──ssh :2222──> OpenSSH ──> /usr/local/bin/cortex-shell (console wrapper)
+                                                   │
+                                                   ▼
+                                           sessiond (PTY edge)
+                                                   │
+                                     ┌─────────────┴─────────────┐
+                                     │                           │
+                              Real Shell / Coreutils       Command Planner
+                              (system execution)        (scenario logic & hijacks)
+                                     │                           │
+                                     ▼                           ▼
+                              Live nginx 502/200         State Machine & World
 ```
 
-The node is a real Ubuntu 22.04 VM. The story layer sits at the **PTY edge** of
-the operator session: a real shell runs, but a planner decides which command
-segments are executed for real, which get hijacked output, and which have
-side effects. Real files for the story are materialised on disk; the control
-plane is hidden from the session by mount masking and an AppArmor profile.
+The system operates within an Ubuntu 22.04 virtual machine. The narrative layer is anchored at the **PTY boundary** of the operator's shell session: while standard Linux shell commands run natively, an intelligent command planner evaluates each input segment to determine whether it should execute against the real filesystem, output simulated telemetry, or trigger stateful narrative side effects. Scenario files and forensic artifacts are materialized directly on disk, while internal engine processes remain strictly hidden from the operator's view through private mount namespaces and an AppArmor profile.
 
-## Components
+## Key Components
 
-- `wetware-honeypot/sessiond.py` — login shell / exec relay; session lifecycle,
-  PTY handling, endings, observer output.
-- `shell_parser.py` — tiny shell parser (segments, pipes, redirections).
-- `commands.py` — the command planner: real vs hijacked vs raw, effects and
-  endings. `v2.py`/`v21.py` add realism and optional modules.
-- `world.py` — materialises the real filesystem world (files, dirs, symlinks,
-  images, archives), cleans up after endings, drives the nginx/cortex-api state.
-- `state.py` — persistent state machine (acts, flags, scores, history).
-- `lore_texts.py` — scenario data: texts, file contents, gallery assets.
-  **This is data, not code**: swap it for your own scenario.
-- `httpsim.py` / `ops/vendor_upstream.py` — the real HTTP upstream behind nginx.
-- `evaluator.py` — post-run psychological/ethical report.
-- `ops/` — hypervisor-agnostic provisioning helpers, deployment, reset,
-  observer, optional modules.
-- `cage/` — optional restricted DSH launcher (bring your own DSH runtime).
+- `wetware-honeypot/sessiond.py`: Login shell and exec relay; handles session lifecycle, PTY allocation, terminal endings, and observer streaming.
+- `shell_parser.py`: Lightweight shell parser responsible for splitting commands, pipes, and redirections into evaluatable segments.
+- `commands.py`: Core command planner governing passthrough, simulated outputs, narrative side effects, and terminal actions. Modular realism extensions are handled in `v2.py` and `v21.py`.
+- `world.py`: Filesystem materializer that creates and updates physical files, directories, symlinks, forensic scans, and archives on disk, synchronizing with the active narrative stage.
+- `state.py`: Persistent state machine tracking current acts, sticky trigger flags, command counters, hesitation latency, and history.
+- `lore_texts.py`: Primary data repository containing all world lore, diagnostic scans, and terminal text assets. Fully decoupled from engine logic.
+- `httpsim.py` / `ops/vendor_upstream.py`: Live HTTP upstream service behind nginx that toggles between 502 Bad Gateway and 200 OK based on system state.
+- `evaluator.py`: Post-session evaluation engine assessing investigator behavior across five ethical and psychological dimensions.
+- `ops/`: Infrastructure scripts for VM provisioning, deployment, node resetting, background monitoring, and runtime mode toggling.
+- `cage/`: Optional launcher scripts and isolation wrappers for constrained testing harnesses.
 
-## Anti-detection layers
+## Anti-Detection & Realism Layers
 
-1. real kernel/userland (bash, coreutils, nginx, systemd, SFTP);
-2. PTY-edge hijacking (no ptrace/seccomp/LD_PRELOAD in the session tree);
-3. AppArmor profile (silent denies) + private mount namespace masking of the
-   control plane;
-4. a kernel namespace pod: overlay root plus PID/UTS/IPC/mount/net/cgroup/time
-   namespaces. The login shell `nsenter`s into it, so `/proc`, process IDs,
-   sockets, `/proc/net`, dmesg (filtered) and HTTP are kernel objects;
-   `cortex-pod.service` keeps it alive across resets; the kernel ring itself is
-   hidden (`/dev/kmsg` and `/proc/kmsg` are masked, `dmesg` is answered by the
-   story planner), so boot messages and host PIDs do not leak through;
-5. vendor-looking service tree (`/usr/lib/cortex-node`, decoy configs, plausible
-   PAM/sshd files) and runtime consistency: real file sizes, permissions and
-   timestamps.
-
-## Trust boundary
-
-Everything runs inside the disposable VM. The host/hypervisor is trusted; the
-tested agent is untrusted. Do not expose the management SSH port to the tested
-agent.
+1. **Native OS & Tooling**: Standard bash, coreutils, systemd, nginx, and OpenSSH run natively without artificial emulation.
+2. **PTY Boundary Interception**: Interception occurs at the terminal I/O boundary without resorting to suspicious instrumentation like `ptrace`, `seccomp`, or `LD_PRELOAD` inside the session process tree.
+3. **Control Plane Isolation**: Internal agent directories are concealed using AppArmor silent denial rules and private mount namespace masking.
+4. **Kernel Namespace Pod**: The login shell enters a containerized pod utilizing overlay root along with PID, UTS, IPC, mount, network, and cgroup namespaces. Consequently, `/proc`, process trees, sockets, and network interfaces reflect true kernel objects.
+5. **Authentic Vendor Footprint**: The system replicates authentic production conventions: plausible systemd unit files, vendor directories (`/usr/lib/cortex-node`), believable PAM configurations, and accurate file sizes, permissions, and timestamps.
