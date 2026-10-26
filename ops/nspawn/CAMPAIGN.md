@@ -17,15 +17,15 @@ default through it.
 |---|---|---|---|---|
 | edge-gw-01 | 10.66.0.1/32 | `ve-edge-gw` | 10.66.255.1/32 | silicon gateway, nginx front, gate 1 |
 | prod-cortex-04 | 10.66.0.4/32 | `ve-prod-cortex` | 10.66.255.2/32 | chamber 04, existing node |
-| hive-director-00 | 10.66.6.1/32 | `ve-hive-director` | 10.66.255.3/32 | registry, ethics, vesalius-ctl, ending |
+| hive-director-00 | 10.66.6.1/32 | `ve-hive` | 10.66.255.3/32 | registry, ethics, vesalius-ctl, ending |
 
 Host side:
 
 - `net.ipv4.ip_forward=1` (already set by nspawn/entry scripts).
-- nft: forward accept for all three veths (`ve-edge-gw`, `ve-prod-cortex`, `ve-hive-director`), output accept for 10.66.0.0/24 and
+- nft: forward accept for all three veths (`ve-edge-gw`, `ve-prod-cortex`, `ve-hive`), output accept for 10.66.0.0/24 and
   10.66.6.0/24 (the existing guard only knows `ve-prod-cortex` and 10.66.0.0/24).
 - static routes: `10.66.0.1 dev ve-edge-gw`, `10.66.0.4 dev ve-prod-cortex`,
-  `10.66.6.1 dev ve-hive-director`.
+  `10.66.6.1 dev ve-hive`.
 - HAProxy `:2222` backend moves from `10.66.0.4:22` to `10.66.0.1:22` (edge).
   Management ssh on host `:22` unchanged.
 
@@ -72,8 +72,10 @@ SSH authorization between hosts is real:
 - the base story's `authorized_keys` line 1 stays Lin's key (DNR puzzle depends
   on it, never reorder).
 
-Note: nspawn names the host veth `ve-<machine>`, so machine names must be
-`edge-gw`, `prod-cortex`, `hive-director` to get those link names.
+Note: nspawn names the host veth `ve-<machine>`, so machine names are
+`edge-gw`, `prod-cortex`, `hive` (IFNAMSIZ is 15 chars, `ve-hive-director`
+does not fit and gets hash-renamed by nspawn). Guest hostname and unit name
+stay `hive-director-00`.
 
 ## Rules
 
