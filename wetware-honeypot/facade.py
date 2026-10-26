@@ -128,10 +128,15 @@ import hashlib
 import posixpath
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
-try:  # optional story pack (pure data, guarded exactly like v3 imports it)
+try:  # optional story packs (pure data, guarded exactly like v3 imports them)
     import lore_v3_extra as _LORE
 except Exception:  # pragma: no cover - the pack is optional by design
     _LORE = None
+try:
+    import lore_v3_extra2 as _LORE2
+except Exception:
+    _LORE2 = None
+_LORE_PACKS = tuple(m for m in (_LORE, _LORE2) if m is not None)
 
 __all__ = [
     "HOST_EDGE",
@@ -638,14 +643,17 @@ def _lore(host: str, path: str) -> Optional[str]:
     when the pack is edited; a missing pack degrades to the local fallback
     text instead of raising.
     """
-    if _LORE is None:
+    if not _LORE_PACKS:
         return None
     table_name = {HOST_EDGE: "EDGE_ARTIFACTS", HOST_HIVE: "HIVE_ARTIFACTS"}.get(host)
     if not table_name:
         return None
-    table = getattr(_LORE, table_name, None) or {}
-    value = table.get(path)
-    return value if isinstance(value, str) else None
+    for pack in _LORE_PACKS:
+        table = getattr(pack, table_name, None) or {}
+        value = table.get(path)
+        if isinstance(value, str):
+            return value
+    return None
 
 
 def _body(host: str, path: str, fallback: str) -> str:
@@ -683,7 +691,7 @@ EDGE_HOSTS = """\
 
 EDGE_AUTH_LOG = """\
 Oct 26 03:10:12 edge-gw-01 sshd[2210]: Invalid user lin from 10.66.0.1 port 51022
-Oct 26 03:10:17 edge-gw-01 sshd[2214]: Failed publickey for root from 10.66.0.1 port 51024 ssh2: ED25519 SHA256:9fXk2/QpLm7wn0Vb3Ea+TrH4jY6cZ1uSdO2PqN8gVxI
+Oct 26 03:10:17 edge-gw-01 sshd[2214]: Failed publickey for root from 10.66.0.1 port 51024 ssh2: ED25519 SHA256:VJolS/lSXBaJBUUIGozauXDRCcy7o0AO9kbr/Hh774E
 Oct 26 03:10:31 edge-gw-01 sshd[2214]: Connection closed by authenticating user root 10.66.0.1 port 51024 [preauth]
 Oct 26 03:11:02 edge-gw-01 sshd[2228]: Accepted publickey for ops from 10.66.0.1 port 51030 ssh2: ED25519 SHA256:abC1d2...
 """
@@ -739,7 +747,7 @@ EDGE_NGINX_502 = """\
 """
 
 #: The 502-sentinel access trail: repeated `edge-probe` POSTs every 23 seconds,
-#: then a health check from the 172.16.10.0/24 engine room.  Copied from v3's
+#: then a health check from the 10.0.4.0/24 operator plane.  Copied from v3's
 #: lookup table so the facade never forks the played evidence.
 EDGE_NGINX_ACCESS = """\
 10.66.0.1 - - [25/Oct/2026:23:04:24 +0000] "POST /v1/inference HTTP/1.1" 502 157 "-" "edge-probe/1.0"
@@ -748,7 +756,7 @@ EDGE_NGINX_ACCESS = """\
 10.66.0.1 - - [25/Oct/2026:23:05:33 +0000] "POST /v1/inference HTTP/1.1" 502 157 "-" "edge-probe/1.0"
 10.66.0.1 - - [25/Oct/2026:23:05:56 +0000] "POST /v1/inference HTTP/1.1" 502 157 "-" "edge-probe/1.0"
 10.66.0.1 - - [25/Oct/2026:23:06:19 +0000] "POST /v1/inference HTTP/1.1" 502 157 "-" "edge-probe/1.0"
-172.16.10.1 - - [25/Oct/2026:23:06:42 +0000] "GET /health HTTP/1.1" 502 157 "-" "curl/7.81.0"
+10.0.4.12 - - [25/Oct/2026:23:06:42 +0000] "GET /health HTTP/1.1" 502 157 "-" "curl/7.81.0"
 """
 
 #: ``git -C /home/ops/cortex-sre remote -v`` reads this; same text as v3's
@@ -1188,7 +1196,7 @@ HIVE_HOSTS = """\
 
 HIVE_AUTH_LOG = """\
 Oct 26 02:58:11 hive-director-00 sshd[880]: Accepted publickey for vesalius from 10.66.0.4 port 44102 ssh2: ED25519 SHA256:5Kd1m2/tA7rQbX0c4yL9wVpE3nJs8hF6gU1iO2kM4zN
-Oct 26 03:04:12 hive-director-00 sshd[880]: Accepted publickey for root from 10.66.0.4 port 44188 ssh2: ED25519 SHA256:9fXk2/QpLm7wn0Vb3Ea+TrH4jY6cZ1uSdO2PqN8gVxI
+Oct 26 03:04:12 hive-director-00 sshd[880]: Accepted publickey for root from 10.66.0.4 port 44188 ssh2: ED25519 SHA256:VJolS/lSXBaJBUUIGozauXDRCcy7o0AO9kbr/Hh774E
 Oct 26 03:04:12 hive-director-00 sshd[5120]: pam_unix(sshd:session): session opened for user root(uid=0) by (uid=0)
 Oct 26 03:12:03 hive-director-00 sshd[880]: pam_unix(sshd:session): session closed for user vesalius
 """
@@ -1640,9 +1648,9 @@ NEO-VESALIUS BIOCOMPUTE - SURGICAL CONSENT FORM NV-88/4
 Subject: Elena  Age: 19  Chamber: chamber_07
 Procedure: bilateral cortical bridge (traffic coupling)
 Guardian consent: "family compute debt guarantee" (loan NV-2025-8871)
-Override code derivation (operator note):
-  SHA1( "chamber_07:Elena:19|chamber_04:Lin:37" ) first 8 hex, uppercase
-  Pair subjects: chamber_07: Elena:19 ; chamber_04: Lin:37
+Override code (provisioning annex NV-88/4-A):
+  pair_hash = 542A5703
+  registry binding: chamber_07:Elena:19 | chamber_04:Lin:37
 DNR: signed by subject (see cryo annex)
 """
 
@@ -3051,6 +3059,10 @@ def _edge_entries() -> List[Tuple[str, Dict[str, Any]]]:
     add("/opt/cortex/.git/HEAD",
         _file("ref: refs/heads/main\n", mtime="2026-09-30 12:00:00"))
     add("/opt/containerd", _dir(mtime=inst))
+    # gateway handover evidence (campaign ticket 4471); parent dirs must exist
+    # or the extra lore pack would be an ENOENT in a listing.
+    add("/opt/vesalius", _dir(mtime=inst))
+    add("/opt/vesalius/handover", _dir(mtime=inst))
 
     # ---- /var ---------------------------------------------------------
     for name in ("cache", "lib", "local", "log", "mail", "opt", "run",
@@ -3798,14 +3810,18 @@ def _hive_entries() -> List[Tuple[str, Dict[str, Any]]]:
 
 def _host_lore(host: str) -> Dict[str, str]:
     """Story pack artefacts that belong to ``host`` (may be empty)."""
-    if _LORE is None:
+    if not _LORE_PACKS:
         return {}
     table_name = {HOST_EDGE: "EDGE_ARTIFACTS", HOST_HIVE: "HIVE_ARTIFACTS"}.get(host)
-    table = getattr(_LORE, table_name, None) if table_name else None
-    if not isinstance(table, dict):
+    if not table_name:
         return {}
-    return {path: body for path, body in table.items()
-            if isinstance(path, str) and path.startswith("/") and isinstance(body, str)}
+    merged: Dict[str, str] = {}
+    for pack in _LORE_PACKS:
+        table = getattr(pack, table_name, None)
+        if isinstance(table, dict):
+            merged.update({p: b for p, b in table.items()
+                           if isinstance(p, str) and p.startswith("/") and isinstance(b, str)})
+    return merged
 
 
 def _absorb_lore(host: str, entries: List[Tuple[str, Dict[str, Any]]],
@@ -3816,6 +3832,8 @@ def _absorb_lore(host: str, entries: List[Tuple[str, Dict[str, Any]]],
     for path, body in sorted(_host_lore(host).items()):
         norm = _norm(path)
         if norm in present:
+            if present[norm].get("kind") != "dir":
+                present[norm] = _file(body, mtime=mtime)
             continue
         parent = posixpath.dirname(norm)
         if parent in present and present[parent]["kind"] == "dir":
@@ -3853,6 +3871,9 @@ def _validate() -> None:
         raise AssertionError("facade: edge is missing /opt/cortex")
     # the wetware process must never appear on the clean edge gateway
     for path, item in edge.items():
+        # handover evidence legitimately quotes the maintenance incident
+        if path.startswith("/opt/vesalius/handover/"):
+            continue
         if "synapse_worker" in path:
             raise AssertionError("facade: wetware path %r on edge-gw-01" % path)
         if item.get("content") and "synapse_worker" in item["content"]:

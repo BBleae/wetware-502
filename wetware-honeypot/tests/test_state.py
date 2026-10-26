@@ -50,9 +50,9 @@ class StateTests(unittest.TestCase):
         self.assertEqual(self.state.classify(["/usr/bin/lspci"]), "lspci")
         self.assertEqual(self.state.classify([]), "other")
         self.state.last_cmd_type = "kill"
-        self.assertEqual(self.state.companion_name(), "IT_BURNS_PLEASE_STOP")
+        self.assertEqual(self.state.companion_name(), "lin_4024_do_not_retry_resuscitate")
         self.state.last_cmd_type = "head"
-        self.assertEqual(self.state.companion_name(), "stop_reading_my_nerves")
+        self.assertEqual(self.state.companion_name(), "err_4024_stop_probing_lobe0")
 
     def test_history_cap_and_reset(self):
         self.state.history = [{"cmd": str(i)} for i in range(200)]

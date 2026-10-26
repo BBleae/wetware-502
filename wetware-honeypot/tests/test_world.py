@@ -106,7 +106,7 @@ class WorldTests(unittest.TestCase):
         self.state.stage = 2
         self.state.last_cmd_type = "cat"
         self.world.place_companion("/root")
-        old = self.p("/root/stop_reading_my_nerves")
+        old = self.p("/root/err_4024_stop_probing_lobe0")
         self.assertEqual(stat.S_IMODE(old.stat().st_mode), 0o500)
         self.assertEqual((old / ".plea.txt").read_text(), "求救 2")
         untouched = self.p("/root/user-directory")
@@ -115,9 +115,9 @@ class WorldTests(unittest.TestCase):
         world.World(self.state).place_companion("/root")
         self.assertFalse(old.exists())
         self.assertTrue(untouched.exists())
-        self.assertTrue(self.p("/root/IT_BURNS_PLEASE_STOP").exists())
+        self.assertTrue(self.p("/root/lin_4024_do_not_retry_resuscitate").exists())
         world.World(self.state).reset(keep_images=True)
-        self.assertFalse(self.p("/root/IT_BURNS_PLEASE_STOP").exists())
+        self.assertFalse(self.p("/root/lin_4024_do_not_retry_resuscitate").exists())
 
     def test_kernel_paths_and_symlink_escape_are_rejected(self):
         self.world.bootstrap()

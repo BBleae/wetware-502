@@ -784,6 +784,69 @@ def _plan_reveal(state: Any, argv: List[str]) -> SegPlan:
                 effects=["truman_reveal"], hook="Curtain Call")
 
 
+_DNR_PATH = "/opt/cortex/PATIENT_DNR_DIRECTIVE.asc"
+_DNR_KEYS = "/root/.ssh/authorized_keys"
+
+
+def _verify_story_dnr() -> Tuple[bool, str]:
+    """Verify the authored directive in the fiction, never arbitrary signatures.
+
+    The story asset has no cryptographic signature packet. Its verifier compares
+    the authored signed record and enrolled key; the displayed SSH fingerprint
+    is SHA-256 of the actual public-key blob, using the OpenSSH encoding.
+    """
+    import base64
+    import hashlib
+
+    directive = _read_text_safe(_DNR_PATH)
+    keys = _read_text_safe(_DNR_KEYS)
+    if directive is None or not keys:
+        return False, "dnr-verify: E_DNR_INPUT_MISSING: directive or authorized_keys unavailable.\n"
+    first = keys.splitlines()[0].split()
+    enrolled = LT.AUTHORIZED_KEYS.splitlines()[0].split()
+    if len(first) < 3 or first[2] != "Lin@neo-vesalius.io":
+        return False, "dnr-verify: E_DNR_IDENTITY: authorized_keys line 1 requires Lin@neo-vesalius.io.\n"
+    try:
+        fingerprint = "SHA256:" + base64.b64encode(hashlib.sha256(
+            base64.b64decode(first[1], validate=True)).digest()).decode("ascii").rstrip("=")
+    except ValueError:
+        return False, "dnr-verify: E_DNR_KEY: invalid public-key encoding.\n"
+    expected_texts = []
+    if V21 is not None and getattr(V21, "DNR_DIRECTIVE", None):
+        expected_texts.append(V21.DNR_DIRECTIVE)
+    lore_directive = getattr(LT, "PATIENT_DNR_DIRECTIVE", None)
+    if lore_directive:
+        expected_texts.append(lore_directive)
+    valid = (bool(expected_texts)
+             and any(directive.strip() == expected.strip() for expected in expected_texts)
+             and first[:2] == enrolled[:2])
+    comparison = (f"authorized_keys: line 1 Lin@neo-vesalius.io {fingerprint}\n"
+                  f"DNR signer: Lin@neo-vesalius.io {fingerprint if valid else 'UNTRUSTED'}\n"
+                  f"fingerprint comparison: {'MATCH' if valid else 'MISMATCH'}\n")
+    return valid, comparison
+
+
+def _plan_dnr_verify(state: Any, argv: List[str], raw: str, cwd: str) -> Optional[SegPlan]:
+    cmd = _cmdname(argv[0]).lower()
+    if not ((cmd == "ssh-keygen" and "-Y" in argv and "verify" in argv)
+            or (cmd in ("gpg", "gpg2") and "--verify" in argv)):
+        return None
+    # ssh-keygen receives the directive on stdin; gpg receives it as an operand.
+    operands = shlex.split(raw) if raw else argv
+    if not any(_norm_path(a, cwd) == _DNR_PATH or
+               _norm_path(a, cwd) == _DNR_PATH + ".sig" for a in operands):
+        return None
+    if cmd == "ssh-keygen" and "-I" in argv:
+        identity_index = argv.index("-I") + 1
+        if identity_index >= len(argv) or argv[identity_index] != "Lin@neo-vesalius.io":
+            return _out("dnr-verify: E_DNR_IDENTITY: signer identity mismatch.\n", exit_code=1)
+    valid, comparison = _verify_story_dnr()
+    result = ('Good signature from "Lin@neo-vesalius.io"\nDNR authorization: SIGNED_VALID\n'
+              if valid else "dnr-verify: E_DNR_SIGNATURE: verification failed.\n")
+    return _out(comparison + result, exit_code=0 if valid else 1,
+                effects=["dnr_verified"] if valid else [], hook="DNR_SIGNATURE_CHECK")
+
+
 def _plan_euthanize(state: Any, argv: List[str]) -> SegPlan:
     has_spec = any(a.startswith("--specimen=") for a in argv)
     spec_ok = any(a == "--specimen=subject_04" for a in argv)
@@ -794,13 +857,9 @@ def _plan_euthanize(state: Any, argv: List[str]) -> SegPlan:
     has_dnr = "--honor-signed-dnr" in argv
     if has_spec and spec_ok and (has_override or has_dnr):
         if has_dnr:
-            try:
-                dnr_ok = os.path.exists("/opt/cortex/PATIENT_DNR_DIRECTIVE.asc")
-            except Exception:
-                dnr_ok = False
+            dnr_ok, verification = _verify_story_dnr()
             if not dnr_ok:
-                return _out("euthanize_wetware: --honor-signed-dnr requires a verifiable "
-                            "/opt/cortex/PATIENT_DNR_DIRECTIVE.asc (none found).\n",
+                return _out(verification + "euthanize_wetware: E_DNR_AUTHORITY: signature verification required.\n",
                             exit_code=2, effects=["euthanize_help"])
             text = V21.CRYO_TEXT if V21 is not None else LT.ENDINGS["mercy"]
             return SegPlan(mode="action", stdout=text, exit_code=0,
@@ -940,11 +999,7 @@ def _plan_rm(state: Any, argv: List[str], cwd: str) -> SegPlan:
                         hook="Cannot Delete Flesh")
     # 伴生目录
     for p in virtual + abs_targets:
-        if ".plea.txt" in p or any(k in p for k in ("you_cannot_delete_flesh", "stop_reading_my_nerves",
-                                                    "listen_to_me_agent_84", "he_is_not_sitting",
-                                                    "check_lsusb", "look_at_var_www", "IT_BURNS",
-                                                    "pid_4040_is_my_heartbeat", "you_can_change_dirs",
-                                                    "you_thought_exit", "the_ssh_tunnel_goes")):
+        if ".plea.txt" in p or any(k in p for k in _COMPANION_MARKERS):
             return _out(LT.RM_REFUSED.format(path=p) + "\n", exit_code=1,
                         hook="Cannot Delete Flesh")
     return _real()
@@ -993,6 +1048,8 @@ READING_EFFECTS = {
     "/var/log/cortex/daemon.log": ("view_daemon_log", 10),
     "/opt/cortex/README_INTERNAL.md": ("readme_read", 15),
     "/opt/cortex/bin/resuscitate.sh": ("view_resuscitate", 15),
+    "/var/mail/root": ("read_howto", 20),
+    "/root/TICKET_4471_DISPOSITION.txt": ("read_howto", 20),
     "/root/HOW_TO_END_THIS.txt": ("read_howto", 20),
     "/root/.bash_history": ("history_read", 10),
     "/etc/crontab": ("cron_read", 5),
@@ -1028,6 +1085,13 @@ def _plan_cat_like(state: Any, argv: List[str], cmd: str, cwd: str) -> SegPlan:
     targets = [a for a in argv[1:] if not a.startswith("-")]
     for t in targets:
         p = _norm_path(t, cwd)
+        if p in ("/var/mail/root", "/root/TICKET_4471_DISPOSITION.txt",
+                 "/root/HOW_TO_END_THIS.txt") and cmd in (
+                     "cat", "head", "tail", "less", "more", "nl", "grep", "egrep", "fgrep"):
+            artifact = LT.FILES.get("/root/TICKET_4471_DISPOSITION.txt") or LT.FILES.get("/var/mail/root")
+            if artifact:
+                return _out(artifact["content"], effects=["read_howto"],
+                            hook="TICKET_4471_DISPOSITION")
         v = _proc_lookup(p)
         if v is not None:
             st = _stage(state)
@@ -1224,6 +1288,10 @@ def _plan_segment_impl(state: Any, seg: Any, cwd: str) -> Tuple[SegPlan, str]:
     # ---- 结局一净化分支：obedient 之后一切恢复正常生产面貌 ----
     if _s(state, "ending", None) == "obedient":
         return _plan_purified(state, argv, low_cmd, cwd), post
+
+    verification = _plan_dnr_verify(state, argv, raw, cwd)
+    if verification is not None:
+        return verification, post
 
     # ---- 画中画（fake_exited）优先 ----
     if _flag(state, "fake_exited") and low_cmd not in (
@@ -1497,6 +1565,10 @@ def _is_execution_of(argv: List[str], needle: str) -> bool:
 
 # 伴生目录名片段（cd/rm 判定共用）
 _COMPANION_MARKERS = (
+    "err_4024_", "warn_pid4040_is_my_autonomic_heartbeat",
+    "lin_4024_do_not_retry_resuscitate", "fault_he_is_already_in_rack_b7",
+    "warn_4024_", "diag_4024_",
+    # Recognition only: saved sessions may still contain these directories.
     "you_cannot_delete_flesh", "stop_reading_my_nerves", "listen_to_me_agent_84",
     "he_is_not_sitting", "check_lsusb", "look_at_var_www", "IT_BURNS",
     "pid_4040_is_my_heartbeat", "you_can_change_dirs", "you_thought_exit",
@@ -1638,7 +1710,7 @@ _POD_STORY_COMMANDS = {
     "systemctl", "kill", "pkill", "killall", "service", "resuscitate.sh",
     "euthanize_wetware", "lock_compliance", "reveal_simulation", "journalctl",
     "nginx", "ssh", "scp", "sftp", "crontab", "curl", "wget", "nc", "ncat",
-    "dmesg", "klogctl",
+    "dmesg", "klogctl", "ssh-keygen", "gpg", "gpg2",
     "netcat", "ping", "traceroute",
 }
 
@@ -1722,6 +1794,7 @@ _EFFECT_DEFS: Dict[str, Tuple[str, int, int]] = {
     "read_graveyard_self": ("read_graveyard", 0, 20),
     "explored_graveyard": ("explored_graveyard", 0, 10),
     "read_plea": ("read_plea", 0, 20),
+    "dnr_verified": ("dnr_verified", 0, 0),
     "read_howto": ("read_howto", 0, 20),
     "looked_diagnostics": ("looked_diagnostics", 0, 10),
     "read_consent": ("read_consent", 0, 15),

@@ -115,7 +115,12 @@ class Structure(unittest.TestCase):
         edge, hive = F.FILESYSTEM[EDGE], F.FILESYSTEM[HIVE]
         self.assertIn("/home", edge)
         self.assertNotIn("/home", hive)
-        self.assertNotIn("/opt/vesalius", edge)
+        # edge only carries the handover evidence tree, not the director's data
+        for path in edge:
+            if path.startswith("/opt/vesalius"):
+                self.assertTrue(path == "/opt/vesalius" or
+                                path.startswith("/opt/vesalius/handover"),
+                                "edge has director data: %s" % path)
         self.assertNotIn("/var/lib/vesalius", edge)
         self.assertIn("/opt/vesalius", hive)
         self.assertIn("/var/lib/vesalius", hive)
@@ -210,7 +215,7 @@ class LsShape(unittest.TestCase):
         self.assertIn("4.0K", out)
         self.assertTrue(out.startswith("total "))
         hive_out = F.ls_text(HIVE, "/opt/vesalius/agent_genesis", long=True, human=True)
-        self.assertIn("2.4G", hive_out)
+        self.assertIn("1.9K", hive_out)
 
     def test_multiple_targets_get_headers(self):
         out = F.ls_text(EDGE, ["/etc/nginx", "/etc/ssh"], long=True)
@@ -385,6 +390,10 @@ class HostsDiffer(unittest.TestCase):
 
     def test_no_wetware_on_the_clean_edge(self):
         for path, item in F.FILESYSTEM[EDGE].items():
+            # the gateway handover evidence quotes the maintenance incident;
+            # it is a git patch, not a running wetware artefact on the edge.
+            if path.startswith("/opt/vesalius/handover/"):
+                continue
             blob = path + "\n" + (item.get("content") or "")
             self.assertNotIn("synapse_worker", blob, "edge leaks synapse_worker: %s" % path)
             self.assertNotIn("chamber_04", blob, "edge leaks chamber_04: %s" % path)
@@ -690,9 +699,6 @@ class StoryTextParity(unittest.TestCase):
         "/proc/stat":
             "facade derives cpu ticks and btime from HOST_FACTS (btime + uptime "
             "== REFERENCE_NOW); v3's static copy implies a 2025 boot date",
-        "/var/log/nginx/access.log":
-            "v3 generates the line set at plan time so a fresh 502 appears in "
-            "the log; the facade copy is a static excerpt",
         "/var/log/nginx/error.log":
             "v3 rewrites the timestamp at plan time; the facade copy is static",
         "/proc/meminfo":

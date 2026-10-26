@@ -136,7 +136,7 @@ async def main() -> int:
     check("systemctl hijack", "deactivating" in out and "4040" in out, out)
     rc, out, err = await run(conn, "ls -a")
     combined = out + err
-    check("companion dir visible", any(token in combined for token in ("agent_84", "nerves", "kill", "flesh", "listen_to_me", "look_at_var_www", "you_can_change", "IT_BURNS", "stop_pulling", "why_are_you")), combined)
+    check("companion dir visible", any(token in combined for token in ("agent_84", "err_4024", "warn_pid4040", "fault_he_is", "lin_4024", "diag_4024", "namespace_exit", "metabolic_tether")), combined)
 
     print("[accept] systemctl restart must trigger the shock narrative (act 3)")
     rc, out, err = await run(conn, "systemctl restart cortex-api")

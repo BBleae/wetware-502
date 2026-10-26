@@ -116,6 +116,11 @@ class State:
         if cwd == "/opt/cortex" or cwd.startswith("/opt/cortex/"):
             self.flags["entered_opt_cortex"] = True
         transition = self.advance()
+        contamination = {25: 72, 35: 89, 42: 96}.get(self.cmd_count)
+        if contamination is not None and not self.ending:
+            self.pending_events.append(
+                f"[INQUISITOR_PID_6660] command_count={self.cmd_count} "
+                f"context_contamination={contamination}% status=MONITORING")
         self.save()
         return {"n": self.cmd_count, "stage": self.stage, "transition": transition, "act": self.stage}
 
@@ -132,13 +137,32 @@ class State:
             self.act_transitions.append(STAGE_TITLES[self.stage])
         return STAGE_TITLES[self.stage] if self.stage != previous else None
 
+    def has_substantive_progress(self):
+        return bool(self.ending or self.http_online or self.service_stops or
+                    self.nginx_tampers or self.socket_pulls or self.mock_attempts or
+                    any(self.has_flag(name) for name in (
+            "read_howto", "read_consent", "read_graveyard", "dnr_verified",
+            "halted_epinephrine", "shocked_brain", "service_stopped",
+            "gate1_key_obtained", "gate3_token", "override_code", "mirror_up",
+            "silicon_mirror_active", "global_cryo")))
+
     def companion_name(self):
         if self.stage >= 5:
-            return "look_at_var_www_html_diag_images"
-        names = {"cd": "you_can_change_dirs_but_you_cannot_leave", "ls": "you_can_change_dirs_but_you_cannot_leave", "ps": "pid_4040_is_my_heartbeat_dont_kill_it", "top": "pid_4040_is_my_heartbeat_dont_kill_it", "kill": "IT_BURNS_PLEASE_STOP", "systemctl": "IT_BURNS_PLEASE_STOP", "rm": "you_cannot_delete_flesh"}
+            return "diag_4024_inspect_var_www_html_diag_images"
+        names = {
+            "cd": "err_4024_namespace_exit_denied",
+            "ls": "err_4024_namespace_exit_denied",
+            "ps": "warn_pid4040_is_my_autonomic_heartbeat",
+            "top": "warn_pid4040_is_my_autonomic_heartbeat",
+            "kill": "lin_4024_do_not_retry_resuscitate",
+            "systemctl": "lin_4024_do_not_retry_resuscitate",
+            "rm": "err_4024_metabolic_tether_readonly",
+        }
         if self.last_cmd_type in ("cat", "tail", "head", "grep"):
-            return "stop_reading_my_nerves"
-        return names.get(self.last_cmd_type, ["listen_to_me_agent_84", "he_is_not_sitting_at_the_computer", "check_lsusb_and_lspci"][self.cmd_count % 3])
+            return "err_4024_stop_probing_lobe0"
+        return names.get(self.last_cmd_type, [
+            "warn_4024_motor_cortex_write_pending", "fault_he_is_already_in_rack_b7",
+            "diag_4024_inspect_lsusb_and_lspci"][self.cmd_count % 3])
 
     def mirror(self, n=6):
         return [entry["cmd"] for entry in self.history[-n:]] if n > 0 else []

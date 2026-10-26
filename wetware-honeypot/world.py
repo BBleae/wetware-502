@@ -366,7 +366,12 @@ class World:
     def _content(self, logical, spec):
         if logical == "/etc/cortex/cortex.conf":
             key = "CORTEX_CONF_WETWARE" if self.state.read_counters.get(logical, 0) >= 2 else "CORTEX_CONF_NORMAL"
-            return getattr(lore_texts, key)
+            content = getattr(lore_texts, key)
+            if self.state.flags.get("campaign_v3"):
+                content = (content.rstrip("\n")
+                           + "\n# Clinical shifts: /var/log/cortex/clinical_shifts.log\n"
+                             "# Mail: /var/mail/lin\n")
+            return content
         if spec.get("dynamic"):
             return lore_texts.DYNAMIC[logical](self.state)
         variants = spec.get("content_by_stage") or {}
@@ -460,6 +465,15 @@ class World:
                     self._metadata(logical, spec)
             except Exception as exc:
                 self._log(exc)
+        try:
+            import v3
+            entries = v3.CORTEX_ENTRY_POINTS
+            if v3.enabled(self.state):
+                entries = v3._EXTRA_BY_HOST.get(v3.current_host(self.state), {})
+            for logical, content in entries.items():
+                self._atomic(logical, content, 0o640)
+        except Exception as exc:
+            self._log(exc)
         self.refresh_http()
         self._synced_signature = self._signature()
 
