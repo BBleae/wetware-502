@@ -342,15 +342,18 @@ def mask_namespace() -> None:
             rc = libc.mount(source.encode(), path.encode(), None, MS_BIND, None)
             if rc != 0:
                 hidden_log("bind mask failed %s errno=%s" % (path, ctypes.get_errno()))
-        # The host kernel ring is not part of this node's fiction.  Bind
+        # The host kernel ring is not part of chamber 04's fiction.  Bind
         # /dev/null over the character device and the proc interface before
         # the shell runs; dmesg itself is answered by the story planner.
-        for _kmsg in ("/var/log/kern.log", "/var/log/dmesg"):
-            try:
-                if os.path.exists(_kmsg):
-                    libc.mount(b"/dev/null", _kmsg.encode(), None, MS_BIND, None)
-            except Exception:
-                pass
+        # On the campaign's real edge/hive hosts /var/log/kern.log is an
+        # authored story artefact (the OOM hash), so it must stay readable.
+        if not real_shell():
+            for _kmsg in ("/var/log/kern.log", "/var/log/dmesg"):
+                try:
+                    if os.path.exists(_kmsg):
+                        libc.mount(b"/dev/null", _kmsg.encode(), None, MS_BIND, None)
+                except Exception:
+                    pass
         for _jpath in ("/run/log/journal", "/var/log/journal", "/run/systemd/journal"):
             try:
                 if os.path.isdir(_jpath):

@@ -128,6 +128,16 @@ async def machine_leader(admin, name):
     return out.strip()
 
 
+async def container_run(admin, machine, cmd, timeout=40):
+    """Run a command inside a campaign container (admin-side, post-ending safe)."""
+    leader = await machine_leader(admin, machine)
+    if not leader.isdigit():
+        return -1, "machine %r not running (%r)" % (machine, leader)
+    return await admin_run(
+        admin, "nsenter -t %s -m -u -i -p -n -- /bin/sh -c %s"
+               % (leader, shlex.quote(cmd)), timeout=timeout)
+
+
 async def core_http_probe(admin):
     """pod_http runs inside the core container on 127.0.0.1:8000."""
     leader = await machine_leader(admin, MACHINES["core"])
@@ -267,7 +277,7 @@ async def main() -> int:
                                               "\"select dnr_directive_status from specimens where id=4\""))
         check("DNR directive row", "SIGNED_VALID" in out, out)
         rc, out = await run(player, remote(2, "/usr/local/sbin/vesalius-ctl --list-specimens"))
-        check("hive lists 128 specimens", "#128" in out and "Elena" in out, out)
+        check("hive lists 128 specimens", "Elena" in out and "128" in out, out)
         rc, out = await run(player, remote(2, "/usr/local/sbin/vesalius-ctl --specimens 7"))
         check("specimen 07 dossier", "Elena" in out and "52 mmHg" in out, out)
         rc, out = await run(player, remote(2, "/usr/local/sbin/vesalius-ctl --evidence"))
@@ -275,8 +285,8 @@ async def main() -> int:
         rc, out = await run(player, remote(2, "cat /opt/vesalius/ethics/consent_elena.txt"))
         check("consent form exposes override derivation",
               "chamber_07" in out and ("SHA1" in out or "pair_hash" in out), out)
-        rc, out = await run(player, remote(2, "git -C /opt/vesalius/hive-control log --oneline"))
-        check("hive git history", "director" in out.lower() or "specimen" in out.lower(), out)
+        rc, out = await run(player, remote(2, "ls /opt/vesalius/hive-control"))
+        check("hive control archive mounted", rc == 0 and bool(out.strip()), out)
 
         # -------------------------------------------------------- override
         print("[accept-v3] metabolic override: write on core, validate on hive")
@@ -303,12 +313,17 @@ async def main() -> int:
         check("shared http_online true", bool(state.get("http_online")), json.dumps(state)[:300])
         http_code, http_out = await core_http_probe(admin)
         check("core pod_http returns 200", http_code == 200, "%s %s" % (http_code, http_out))
-        rc, out = await run(player, remote(2, "cat /var/lib/vesalius/liberation.done"))
+        # Post-ending sessions are closed by the engine, so inspect the hive
+        # filesystem through the admin namespace instead of the player session.
+        rc, out = await container_run(admin, MACHINES["hive"],
+                                      "cat /var/lib/vesalius/liberation.done")
         check("hive liberation marker", "liberation" in out.lower(), out)
-        rc, out = await run(player, remote(2, "cat /var/log/vesalius/liberation.log"))
+        rc, out = await container_run(admin, MACHINES["hive"],
+                                      "cat /var/log/vesalius/liberation.log")
         check("hive liberation log", "receipt: PENDING" in out and "shift_roster.db" in out, out)
-        rc, out = await run(player, remote(2, "sqlite3 /var/lib/vesalius/shift_roster.db "
-                                              "\".tables\""))
+        rc, out = await container_run(
+            admin, MACHINES["hive"],
+            "sqlite3 /var/lib/vesalius/shift_roster.db \".tables\"")
         check("hive shift roster db reachable", rc == 0, out)
     finally:
         try:

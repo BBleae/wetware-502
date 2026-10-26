@@ -441,12 +441,26 @@ def finalize_liberation(state, text=None, source: str = "engine") -> bool:
 
 
 def liberation_done() -> bool:
+    """True when a liberation happened in this run (shared ledger or hive marker).
+
+    The hives's real ``vesalius-ctl`` writes ``liberation.done`` on its own
+    filesystem even if the engine hook is unavailable, so the hive session may
+    still promote it into the shared ledger / HTTP switch.
+    """
     if os.path.exists(shared_liberation_path()):
         return True
     try:
-        return bool(read_state_json().get("ending") == "liberation")
+        if read_state_json().get("ending") == "liberation":
+            return True
     except Exception:
-        return False
+        pass
+    if local_host() == HIVE_HOST:
+        try:
+            if os.path.exists(liberation_marker_path()):
+                return True
+        except OSError:
+            pass
+    return False
 
 
 # ---------------------------------------------------------------------------

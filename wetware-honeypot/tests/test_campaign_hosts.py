@@ -322,6 +322,19 @@ class LiberationTests(CampaignHostBase):
         self.assertTrue(pod_http_state.get("http_online"))
         self.assertEqual(pod_http_state.get("ending"), "liberation")
 
+    def test_hive_local_marker_promotes_liberation(self):
+        self.set_host(HIVE)
+        campaign.bind_state(self.state)
+        os.makedirs(os.path.dirname(campaign.liberation_marker_path()), exist_ok=True)
+        with open(campaign.liberation_marker_path(), "w", encoding="utf-8") as stream:
+            stream.write('{"ending": "liberation"}\n')
+        self.assertTrue(campaign.liberation_done())
+        runtime = sessiond.Runtime.__new__(sessiond.Runtime)
+        runtime.state = self.state
+        runtime.finalize_campaign_liberation(source="test")
+        self.assertEqual(self.state.ending, "liberation")
+        self.assertTrue(campaign.http_online())
+
     def test_liberation_is_idempotent(self):
         self._liberate()
         campaign_hive.hook_liberation(marker="")
