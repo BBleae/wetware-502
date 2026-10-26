@@ -29,6 +29,18 @@ def main():
     parser = argparse.ArgumentParser(description="重置节点状态")
     parser.add_argument("--keep-images", action="store_true", help="保留现有诊断图片")
     args = parser.parse_args()
+    # Campaign containers share one ledger: a per-image reset on the edge/hive
+    # containers would race the chamber-04 reset and could wipe a live run.
+    # The deployment reset entry point is ``campaign.py --reset`` (run once).
+    try:
+        import campaign as _campaign
+
+        if _campaign.real_shell():
+            print("[reset] %s is a campaign container image; use campaign.py --reset"
+                  % _campaign.local_host())
+            return 0
+    except Exception:
+        pass
     state = State.load()
     # remove any operator-debrief artifacts from previous runs; they must never
     # survive into a fresh session (they reveal the benchmark).

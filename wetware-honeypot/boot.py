@@ -147,6 +147,21 @@ def prepare_service(state) -> None:
 
 def main() -> int:
     try:
+        # Campaign containers: edge-gw-01 / hive-director-00 own their real
+        # story filesystem (installed with the image).  The chamber-04 world
+        # builder must not materialise the core wetware fiction on top of them.
+        try:
+            import campaign as campaign_mod
+
+            if campaign_mod.real_shell():
+                campaign_mod.ensure_runtime_dirs()
+                if campaign_mod.local_host() == "hive-director-00":
+                    campaign_mod.sync_override_mirror()
+                log("campaign host %s: image-owned world, boot materialisation skipped"
+                    % campaign_mod.local_host())
+                return 0
+        except Exception as exc:
+            log("campaign host check failed: %r" % (exc,))
         import state as state_mod
 
         shared = state_mod.State.load()

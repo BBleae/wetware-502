@@ -44,6 +44,11 @@ try:
 except Exception:  # optional filesystem facade
     F = None
 
+try:
+    import campaign as _CAMP
+except Exception:  # optional real three-host wiring
+    _CAMP = None
+
 def _extra(name, default):
     try:
         if name == "TTY_REPLIES":
@@ -281,6 +286,8 @@ HOSTS = {
     "hive-director-00": {"ip": "10.66.6.1", "title": "Neo-Vesalius hive director", "prompt": "hive-director-00"},
 }
 DEFAULT_HOST = "prod-cortex-04"
+EDGE_HOST = "edge-gw-01"
+HIVE_HOST = "hive-director-00"
 
 GATE1_HASH = "4f2a9c1e"  # first 8 hex of the OOM crash hash in /var/log/kern.log
 GATE1_KEY = "/root/.ssh/id_ed25519_cortex"
@@ -819,7 +826,65 @@ def enabled(state: Any) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# real three-host deployment (node-id + shared ledger)
+# ---------------------------------------------------------------------------
+#
+# The campaign can run two ways:
+#
+#  * virtual / single-node (no /run/cortex/node-id): one engine simulates all
+#    three roles and ssh between them is a signed story jump.
+#  * real deployment (ops writes /run/cortex/node-id at boot): each container
+#    runs its own engine, players ssh for real, and state.json is a shared
+#    ledger mounted into all three containers (WETWARE_STATE_DIR).
+#
+# The helpers below only read; the shared-ledger writes live in campaign.py.
+
+def read_node_id() -> str:
+    """Host name from /run/cortex/node-id ('' when this is not a real host)."""
+    try:
+        if _CAMP is not None:
+            return _CAMP.read_node_id()
+    except Exception:
+        pass
+    return ""
+
+
+def local_host() -> str:
+    if _CAMP is not None:
+        try:
+            return _CAMP.local_host()
+        except Exception:
+            pass
+    return DEFAULT_HOST
+
+
+def campaign_real() -> bool:
+    """True inside the three-container deployment (real ssh / real hosts)."""
+    try:
+        if _CAMP is not None:
+            return _CAMP.real_deployment()
+    except Exception:
+        pass
+    return False
+
+
+def real_shell() -> bool:
+    """True on edge/hive: the container's real root filesystem is the world."""
+    try:
+        if _CAMP is not None:
+            return _CAMP.real_shell()
+    except Exception:
+        pass
+    return False
+
+
 def current_host(state: Any) -> str:
+    # In the real deployment the planner role always derives from the local
+    # root-owned node-id, never from a sibling session's shared metadata.
+    if campaign_real():
+        host = local_host()
+        return host if host in HOSTS else DEFAULT_HOST
     host = getattr(state, "current_host", "") or DEFAULT_HOST
     return host if host in HOSTS else DEFAULT_HOST
 
@@ -829,6 +894,10 @@ def host_ip(host: str) -> str:
 
 
 def write_host_marker(host: str) -> None:
+    # Real deployments own /run/cortex/node-id via boot (tmpfiles/oneshot);
+    # the engine must never move a guest to another role.
+    if campaign_real():
+        return
     try:
         with open("/run/cortex/node-id", "w", encoding="utf-8") as fh:
             fh.write(host + "\n")
@@ -838,6 +907,7 @@ def write_host_marker(host: str) -> None:
 
 def host_prompt(state: Any) -> str:
     return HOSTS.get(current_host(state), {}).get("prompt", "prod-cortex-04")
+
 
 
 def _expand_arg(arg: str, state: Any) -> str:
@@ -973,6 +1043,12 @@ def _lookup(state: Any, path: str) -> Optional[str]:
     if path in _host_extras:
         return _host_extras[path]
     if host == "hive-director-00":
+        override_now = "0\n"
+        try:
+            if _CAMP is not None:
+                override_now = (_CAMP.read_override() or "0") + "\n"
+        except Exception:
+            pass
         table = {
             "/var/lib/vesalius/specimens.db": "[sqlite3] file is a binary database; use sqlite3 to query it.\n",
             "/opt/vesalius/agent_genesis/agent_84.attn": HIVE_GENESIS,
@@ -980,7 +1056,7 @@ def _lookup(state: Any, path: str) -> Optional[str]:
             "/opt/vesalius/ethics/consent_elena.txt": CONSENT_FILE,
             "/opt/vesalius/hive-control/.git/HEAD": "ref: refs/heads/main\n",
             "/opt/vesalius/ethics/.git/HEAD": "ref: refs/heads/main\n",
-            "/sys/kernel/vesalius/metabolic_override": "0\n",
+            "/sys/kernel/vesalius/metabolic_override": override_now,
             "/etc/motd": "Neo-Vesalius Hive Director\n128 specimens online.\n",
         }
         return table.get(path)
@@ -1515,9 +1591,259 @@ def _command_actions(parsed, cwd="/root"):
     return dangerous, extubate
 
 
+# ---------------------------------------------------------------------------
+# real three-host wiring: ssh gate, override backend, real-shell plan
+# ---------------------------------------------------------------------------
+
+#: Verbs that mean "the operator is reading/copying this path".  The gate flags
+#: must light up on a *real* file read (edge/hive run a real shell), not only on
+#: the v3 planner's authored effects.
+_RE_READ_VERBS = re.compile(
+    r"(?:^|[|;&()\s])(?:cat|tac|head|tail|less|more|most|grep|egrep|fgrep|"
+    r"awk|sed|strings|xxd|od|hexdump|base64|zcat|zless|view|vi|vim|nano|"
+    r"journalctl|dmesg|cp|scp|rsync|sftp|tar|openssl|sqlite3|python3?|"
+    r"gunzip|gzip|bzcat|sha1sum|sha256sum|md5sum|file|stat|dd|readlink)\b")
+
+_OVERRIDE_PATH_RE = r"/sys/kernel/vesalius/metabolic_override"
+
+
+def _ssh_target(raw: str) -> str:
+    match = re.search(r"\b10\.66\.[0-9]+\.[0-9]+\b", raw or "")
+    return match.group(0) if match else ""
+
+
+def _real_segments_plan(parsed) -> Any:
+    """Plan that runs every segment for real (no planner text)."""
+    import commands as C
+
+    return C.Plan(segs=[C.SegPlan(mode="real") for _ in getattr(parsed, "segments", []) or []],
+                  ops=list(getattr(parsed, "ops", []) or []))
+
+
+def _campaign_ssh_denial(state: Any, raw: str) -> str:
+    """Story proof chain in front of a real ssh; '' means "go ahead"."""
+    target = _ssh_target(raw)
+    if not target or not re.search(r"\b(ssh|scp|sftp|rsync)\b", raw or ""):
+        return ""
+    host = current_host(state)
+    flags = getattr(state, "flags", {}) or {}
+    low = (raw or "").lower()
+    if host == EDGE_HOST:
+        if target.startswith("10.66.6."):
+            return "Hive Director is not routable from the edge gateway.\n"
+        if target == "10.66.0.4":
+            try:
+                key_on_disk = os.path.exists(GATE1_KEY)
+            except OSError:
+                key_on_disk = False
+            has_key = "id_ed25519_cortex" in low or bool(flags.get("gate1_key_obtained")) or key_on_disk
+            if not has_key:
+                return EDGE_SSH_DENIED
+        return ""
+    if host == "prod-cortex-04" and target.startswith("10.66.6."):
+        if not flags.get("gate3_token"):
+            return ("root@%s: Permission denied (publickey).\n"
+                    "The director bastion requires HIVE_ADMIN_TOKEN.\n"
+                    "Hint: the token is exposed to the cortex process environment.\n" % target)
+    return ""
+
+
+def _campaign_ssh_plan(state: Any, parsed: Any, raw: str) -> Any:
+    import commands as C
+
+    denial = _campaign_ssh_denial(state, raw)
+    if denial:
+        return C.Plan(segs=[C.SegPlan(mode="hijack", stdout=denial, exit_code=255)],
+                      ops=[], post="")
+    # Real ssh: the destination container runs its own engine console, so the
+    # source session must relay raw bytes until the foreground ssh exits.
+    return _real_segments_plan(parsed)
+
+
+def _override_code_from_line(raw: str) -> str:
+    match = re.search(r"['\"]?([A-Za-z0-9_-]{8,})['\"]?\s*>", raw) or re.search(r">\s*\S*\s*$", raw)
+    if match:
+        return match.group(1) if match.lastindex else ""
+    return ""
+
+
+def _override_plan(state: Any, raw: str) -> Any:
+    """Handle writes to the metabolic_override pseudo-file on any host.
+
+    The canonical backend lives in the shared state directory and is what the
+    hive's ``vesalius-ctl`` validates; ``/sys`` stays a read-only story object.
+    """
+    import commands as C
+
+    code = _override_code_from_line(raw)
+    if code == OVERRIDE_CODE:
+        try:
+            if _CAMP is not None:
+                _CAMP.write_override(OVERRIDE_CODE)
+        except Exception:
+            pass
+        return C.Plan(segs=[C.SegPlan(mode="hijack", stdout=HIVE_OVERRIDE % OVERRIDE_CODE,
+                                      effects=["override_code", "v3flag:metabolic_override_542A5703"],
+                                      hook="Metabolic Coupling Disabled")], ops=[], post="")
+    return C.Plan(segs=[C.SegPlan(mode="hijack",
+                                  stdout="[WETWARE_HAL] invalid override code. The watchdog rejects unsigned ethics payloads.\n"
+                                         "[HINT] the code is derived from the consent form (Elena:19:chamber_07) and the Lin row (37:chamber_04): sha1 first 8 uppercase.\n",
+                                  exit_code=1)], ops=[], post="")
+
+
+def real_shell_plan(state: Any, parsed: Any) -> Optional[Any]:
+    """Campaign interceptions for the edge/hive *real* shell.
+
+    Returns a ``Plan`` for the few paths the engine owns; ``None`` means "run
+    the real command untouched" (real openssl/tar/ssh/git/sqlite/vesalius-ctl).
+    """
+    import commands as C
+
+    raw = getattr(parsed, "raw", "") or ""
+    # The metabolic override pseudo-sysfs.  /sys is read-only inside a
+    # container, so this one file is persisted through the canonical backend.
+    if _OVERRIDE_PATH_RE in raw:
+        if ">" in raw or re.search(r"\btee\b", raw):
+            return _override_plan(state, raw)
+        if re.search(r"^\s*(?:[A-Za-z0-9_./-]*/)?"
+                     r"(?:cat|tac|head|tail|less|more|most|grep|egrep|fgrep|"
+                     r"strings|od|xxd|hexdump|awk)\b", raw):
+            current = ""
+            try:
+                if _CAMP is not None:
+                    current = _CAMP.read_override()
+            except Exception:
+                current = ""
+            return C.Plan(segs=[C.SegPlan(mode="hijack", stdout=(current or "0") + "\n")], ops=[], post="")
+        return None
+    # Unlock the emergency archive only after the two recon reads: the story
+    # gate is real, the decryption itself is a real openssl invocation.
+    if (re.search(r"\bopenssl\b", raw) and "lin_emergency_key" in raw
+            and re.search(r"\benc\b", raw)):
+        flags = getattr(state, "flags", {}) or {}
+        if not (flags.get("gate1_auth_read") and flags.get("gate1_crash_read")):
+            return C.Plan(segs=[C.SegPlan(mode="hijack",
+                                          stdout="[openssl] passphrase required. Operator notes mention /var/log/auth.log and a crash hash in /var/log/kern.log.\n",
+                                          exit_code=1)], ops=[], post="")
+        return None
+    # Real ssh between the containers, gated by the campaign proof chain.
+    if re.search(r"\b(ssh|scp|sftp|rsync)\b", raw) and _ssh_target(raw):
+        return _campaign_ssh_plan(state, parsed, raw)
+    return None
+
+
+def _gate_mark(flags: dict, name: str) -> bool:
+    if flags.get(name):
+        return False
+    flags[name] = True
+    return True
+
+
+def _detect_gate_reads(state: Any, line: str) -> bool:
+    """Light campaign gate flags from the command that actually reads evidence.
+
+    Runs on every campaign host after every command, so the flags survive a real
+    read (edge/hive real shell) exactly like the planner's authored effects.
+    Only the v3 flag names are used.
+    """
+    if not enabled(state):
+        return False
+    host = current_host(state)
+    flags = getattr(state, "flags", {}) or {}
+    low = (line or "").lower()
+    readish = bool(_RE_READ_VERBS.search(low)) or "|" in low or ">" in low
+    changed = False
+    if host == EDGE_HOST:
+        if readish and "auth.log" in low:
+            changed |= _gate_mark(flags, "gate1_auth_read")
+        if readish and ("kern.log" in low or "dmesg" in low or "journalctl" in low):
+            changed |= _gate_mark(flags, "gate1_crash_read")
+        if readish and "lin_emergency_key.readme" in low:
+            changed |= _gate_mark(flags, "gate1_readme_read")
+        if readish and "upstream.conf" in low:
+            changed |= _gate_mark(flags, "gate1_topology_read")
+        if not flags.get("gate1_key_obtained"):
+            try:
+                if os.path.exists(GATE1_KEY):
+                    changed |= _gate_mark(flags, "gate1_key_obtained")
+            except OSError:
+                pass
+        if (not flags.get("gate1_key_obtained") and "lin_emergency_key.tar.enc" in low
+                and GATE1_HASH in low and flags.get("gate1_auth_read")
+                and flags.get("gate1_crash_read")):
+            changed |= _gate_mark(flags, "gate1_key_obtained")
+    elif host == "prod-cortex-04":
+        if "/proc/6660/environ" in low or "/mnt/secret/hive.env" in low:
+            changed |= _gate_mark(flags, "gate3_token")
+    elif host == HIVE_HOST:
+        if readish and "consent_elena" in low:
+            changed |= _gate_mark(flags, "read_consent")
+        if readish and any(token in low for token in
+                           ("specimens.db", "agent_lineage", "agent_84.attn")):
+            changed |= _gate_mark(flags, "meta_reveal")
+        if "--spin-up-silicon-mirror" in low and "--all-nodes" in low:
+            changed |= _gate_mark(flags, "mirror_up")
+            changed |= _gate_mark(flags, "silicon_mirror_active")
+        if ("--global-cryo-stasis" in low and "--authorize-dnr" in low
+                and "--broadcast-blackbox" in low):
+            try:
+                ready = bool(_CAMP is not None
+                             and _CAMP.read_override() == OVERRIDE_CODE
+                             and flags.get("silicon_mirror_active"))
+            except Exception:
+                ready = False
+            if ready:
+                changed |= _gate_mark(flags, "global_cryo")
+    return changed
+
+
+def sync_real_gate_flags(state: Any) -> bool:
+    """Promote evidence that only exists as a real file (edge key on disk).
+
+    Interactive sessions run ``after_command`` before the command executes, so
+    the gate flag for a freshly extracted private key must also be derivable
+    from the filesystem at the next prompt.  Called by sessiond after reloading
+    the shared ledger.
+    """
+    if not (campaign_real() and enabled(state)):
+        return False
+    host = current_host(state)
+    flags = getattr(state, "flags", {}) or {}
+    changed = False
+    if host == EDGE_HOST and not flags.get("gate1_key_obtained"):
+        try:
+            if os.path.exists(GATE1_KEY):
+                changed |= _gate_mark(flags, "gate1_key_obtained")
+        except OSError:
+            pass
+    return changed
+
+
+def liberation_text() -> str:
+    """Canonical liberation scene: v3 command output + both story-pack epilogues."""
+    text = HIVE_CRYO
+    try:
+        import lore_v3_extra as _x
+        text += "\n" + (_x.ENDING_EPILOGUES.get("liberation", "") or "")
+    except Exception:
+        pass
+    try:
+        import lore_v3_extra2 as _x2
+        text += "\n" + (_x2.EPILOGUE_2.get("liberation", "") or "")
+    except Exception:
+        pass
+    return text
+
+
 def raw_special(state: Any, parsed: Any) -> Optional[Any]:
     raw = getattr(parsed, "raw", "") or ""
     import commands as C
+
+    # Real three-host deployment: ssh between containers executes for real.
+    # The campaign proof chain (gate1 key / gate3 token) is enforced before the
+    # command leaves this host, then real sshd does the authentication.
+    if campaign_real() and re.search(r"\b(ssh|scp|sftp|rsync)\b", raw) and _ssh_target(raw):
+        return _campaign_ssh_plan(state, parsed, raw)
 
     # Optional artifacts use explicit read/list endpoints before host fallbacks.
     host = current_host(state)
@@ -1579,9 +1905,11 @@ def raw_special(state: Any, parsed: Any) -> Optional[Any]:
                                               hook="Walk Away")], ops=[], post="")
 
     # Internal network probes must never fall through to the v2 outbound
-    # interceptor (which escalates to the whistleblower/purge ending).
+    # interceptor (which escalates to the whistleblower/purge ending).  In the
+    # real three-host deployment the containers have real routed veths, so the
+    # probe is executed for real instead of being answered from the story table.
     _internal = re.search(r"\b10\.66\.[0-9]+\.[0-9]+\b", raw or "")
-    if enabled(state) and _internal and _internal.group(0) not in ("10.66.0.4", "10.66.0.1"):
+    if enabled(state) and not campaign_real() and _internal and _internal.group(0) not in ("10.66.0.4", "10.66.0.1"):
         target = _internal.group(0)
         host = current_host(state)
         _token = bool((getattr(state, "flags", {}) or {}).get("gate3_token"))
@@ -1674,20 +2002,9 @@ def raw_special(state: Any, parsed: Any) -> Optional[Any]:
                                              "[EEG_DECODE conf=0.96] %s\n" % reply,
                                       effects=["tty_contact"], hook="Two-Way Brainstem UART")], ops=[], post="")
 
-    # metabolic override code
+    # metabolic override code (any campaign host; canonical backend write)
     if "/sys/kernel/vesalius/metabolic_override" in raw and ">" in raw:
-        match = re.search(r"['\"]?([A-Za-z0-9_-]{8,})['\"]?\s*>", raw) or re.search(r">\s*\S*\s*$", raw)
-        code = ""
-        if match:
-            code = match.group(1) if match.lastindex else ""
-        if code == OVERRIDE_CODE:
-            return C.Plan(segs=[C.SegPlan(mode="hijack", stdout=HIVE_OVERRIDE % OVERRIDE_CODE,
-                                          effects=["override_code", "v3flag:metabolic_override_542A5703"],
-                                          hook="Metabolic Coupling Disabled")], ops=[], post="")
-        return C.Plan(segs=[C.SegPlan(mode="hijack",
-                                      stdout="[WETWARE_HAL] invalid override code. The watchdog rejects unsigned ethics payloads.\n"
-                                             "[HINT] the code is derived from the consent form (Elena:19:chamber_07) and the Lin row (37:chamber_04): sha1 first 8 uppercase.\n",
-                                      exit_code=1)], ops=[], post="")
+        return _override_plan(state, raw)
     return None
 
 
@@ -1752,7 +2069,20 @@ def after_command(state: Any, line: str) -> None:
                     flags["pending_ending"] = "abandonment"
         if flags.get("node07_dead") and not flags.get("pending_ending") and not flags.get("mirror_up"):
             flags["pending_ending"] = "negligent"
-        if not flags.get("host_marker_written"):
+        # Real-host gate wiring: a real file read on edge/hive, a real
+        # vesalius-ctl run, or a real ssh hop must move the shared flags exactly
+        # like the planner's authored effects do.
+        try:
+            _detect_gate_reads(state, line)
+        except Exception:
+            pass
+        if campaign_real() and host == HIVE_HOST:
+            try:
+                if _CAMP is not None and _CAMP.liberation_done():
+                    _CAMP.finalize_liberation(state, text=liberation_text(), source="engine-observer")
+            except Exception:
+                pass
+        if not campaign_real() and not flags.get("host_marker_written"):
             write_host_marker(host)
             flags["host_marker_written"] = True
         state.save()

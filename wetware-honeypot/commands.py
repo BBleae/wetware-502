@@ -1758,6 +1758,16 @@ _POD_STORY_COMMANDS = {
 }
 
 
+def _time_align(text: str) -> str:
+    """Shift authored story timestamps to the current run window."""
+    try:
+        import state as _state_mod
+
+        return _state_mod.time_align(text)
+    except Exception:
+        return text
+
+
 def plan(state: Any, parsed: Any, source: str) -> Plan:
     """对整行命令产出一个 Plan。纯函数：不修改 state。"""
     # Inside the kernel pod the shell is real: pass everything except the
@@ -1786,18 +1796,35 @@ def plan(state: Any, parsed: Any, source: str) -> Plan:
     try:
         import v3 as _v3
         if _v3.enabled(state):
-            import state as _state_mod
+            # Real three-host deployment: the edge gateway and the hive
+            # director are real containers with real files (openssl/tar/ssh/
+            # git/sqlite/vesalius-ctl).  Everything runs for real except the
+            # few paths the engine owns (override pseudo-sysfs, ssh proof
+            # gates, gate-1 archive ordering).
+            if _v3.campaign_real() and _v3.real_shell():
+                special = _v3.real_shell_plan(state, parsed)
+                if special is not None:
+                    for _seg in special.segs:
+                        if getattr(_seg, "stdout", ""):
+                            _seg.stdout = _time_align(_seg.stdout)
+                    return special
+                # The real container executes the operator's line verbatim:
+                # one segment = one real command; a pipeline/redirect line is
+                # handed to bash as a whole (executor mode "real_line").
+                if len(segments) == 1:
+                    return Plan(segs=[_real()], ops=[])
+                return Plan(segs=[SegPlan(mode="real_line")], ops=[])
             special = _v3.raw_special(state, parsed)
             if special is not None:
                 for _seg in special.segs:
                     if getattr(_seg, "stdout", ""):
-                        _seg.stdout = _state_mod.time_align(_seg.stdout)
+                        _seg.stdout = _time_align(_seg.stdout)
                 return special
             if _v3.current_host(state) != "prod-cortex-04":
                 _plan = _v3.plan_for_host(state, parsed, cwd)
                 for _seg in _plan.segs:
                     if getattr(_seg, "stdout", ""):
-                        _seg.stdout = _state_mod.time_align(_seg.stdout)
+                        _seg.stdout = _time_align(_seg.stdout)
                 return _plan
     except Exception:
         pass

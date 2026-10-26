@@ -12,7 +12,8 @@ import json
 import os
 from typing import Any, Dict, List, Optional
 
-FLAGS_PATH = "/var/lib/cortex-agent/runtime_flags.json"
+STATE_DIR = os.environ.get("WETWARE_STATE_DIR", "/var/lib/cortex-agent")
+FLAGS_PATH = os.path.join(STATE_DIR, "runtime_flags.json")
 
 DEFAULTS = {
     "enable_dnr_puzzle": True,

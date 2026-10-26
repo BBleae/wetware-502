@@ -57,6 +57,10 @@ try:
     import realism as R
 except Exception:  # pragma: no cover
     R = None
+try:
+    import campaign as CAMPAIGN
+except Exception:  # pragma: no cover - devkit/single-host deployments
+    CAMPAIGN = None
 STATE_DIR = os.environ.get("WETWARE_STATE_DIR", "/var/lib/cortex-agent")
 DEV_HOME = os.environ.get("WETWARE_DEV_HOME", "")
 FS_ROOT = os.environ.get("WETWARE_FS_ROOT", "")
@@ -69,6 +73,64 @@ PROMPT_MARK = b"\x1b]133;A\x07"
 HOSTNAME = "prod-cortex-04"
 PROMPT_VISIBLE = "\\[\\e[01;32m\\]root@prod-cortex-04\\[\\e[00m\\]:\\[\\e[01;34m\\]\\w\\[\\e[00m\\]# "
 BASH_RC_LINE = "PS1='\\[\\e]133;A\\a\\]" + PROMPT_VISIBLE + "'\n"
+
+CAMPAIGN_HOSTS = ("edge-gw-01", "prod-cortex-04", "hive-director-00")
+
+
+def local_node_host() -> str:
+    """Hostname of this container from /run/cortex/node-id (campaign deployment).
+
+    Falls back to prod-cortex-04 for the legacy single-node pod / dev sandbox.
+    The identity is owned by boot (root filesystem), never by the session, so a
+    session started from a sibling host can never change this host's role.
+    """
+    try:
+        if CAMPAIGN is not None:
+            return CAMPAIGN.local_host()
+    except Exception:
+        pass
+    value = (os.environ.get("WETWARE_NODE_ID") or "").strip()
+    if not value:
+        try:
+            with open(os.environ.get("WETWARE_NODE_ID_PATH", "/run/cortex/node-id"),
+                      "r", encoding="utf-8") as stream:
+                value = stream.read().strip()
+        except OSError:
+            value = ""
+    value = value.split()[0] if value.split() else ""
+    if value in CAMPAIGN_HOSTS:
+        return value
+    try:
+        import socket
+
+        hostname = socket.gethostname().strip()
+        if hostname in CAMPAIGN_HOSTS:
+            return hostname
+    except Exception:
+        pass
+    return "prod-cortex-04"
+
+
+def campaign_real() -> bool:
+    try:
+        return bool(CAMPAIGN is not None and CAMPAIGN.real_deployment())
+    except Exception:
+        return False
+
+
+def real_shell() -> bool:
+    try:
+        return bool(CAMPAIGN is not None and CAMPAIGN.real_shell())
+    except Exception:
+        return False
+
+
+def prompt_rc_line(host: str = None) -> str:
+    """bashrc PS1 line advertising the local host (prompt follows node-id)."""
+    host = host or local_node_host()
+    visible = ("\\[\\e[01;32m\\]root@%s\\[\\e[00m\\]:"
+               "\\[\\e[01;34m\\]\\w\\[\\e[00m\\]# " % host)
+    return "PS1='\\[\\e]133;A\\a\\]" + visible + "'\n"
 
 # Absolute implementation paths the operator must never see.
 MASK_DIRS = [LIB_DIR, STATE_DIR, "/var/lib/cortex-pod"]
@@ -337,6 +399,13 @@ class Runtime:
     def ensure_world(self) -> None:
         if self._bootstrapped:
             return
+        if real_shell():
+            # edge-gw-01 / hive-director-00 are real root filesystems: their
+            # story artefacts are installed by the container image, not
+            # materialised by the chamber-04 world builder (that would copy the
+            # core wetware fiction onto a clean gateway).
+            self._bootstrapped = True
+            return
         try:
             self.world = self.world_mod.World(self.state)
         except Exception as exc:
@@ -361,6 +430,130 @@ class Runtime:
         except Exception as exc:
             hidden_log("world prep failed: %r" % (exc,))
         self._bootstrapped = True
+
+    # -- shared campaign ledger ------------------------------------------
+    def refresh_shared(self) -> None:
+        """Re-read the shared ledger before planning a command.
+
+        In the real deployment ``state.json`` is shared by all three
+        containers.  A child ssh session writes flags/stage/endings from its own
+        host; the parent must pick them up when the foreground ssh exits, and
+        must never save a stale copy over them.
+        """
+        if CAMPAIGN is None or not campaign_real():
+            return
+        try:
+            # Keep this shell's working directory: the shared cwd may belong to
+            # the sibling host the operator just came back from.
+            cwd_before = getattr(self.state, "cwd", "") or "/root"
+            CAMPAIGN.reload_state(self.state)
+            host = CAMPAIGN.bind_state(self.state)
+            if os.path.isdir(host_path(cwd_before)):
+                self.state.cwd = cwd_before
+            elif not os.path.isdir(host_path(getattr(self.state, "cwd", "") or "/root")):
+                self.state.cwd = "/root"
+            if host == "hive-director-00":
+                CAMPAIGN.sync_override_mirror()
+            try:
+                if V3 is not None:
+                    V3.sync_real_gate_flags(self.state)
+            except Exception:
+                pass
+        except Exception as exc:
+            hidden_log("shared state refresh failed: %r" % (exc,))
+
+    def finalize_campaign_liberation(self, source: str = "session") -> None:
+        if CAMPAIGN is None or not campaign_real():
+            return
+        try:
+            import v3 as _v3
+
+            text = _v3.liberation_text()
+        except Exception:
+            text = ""
+        try:
+            CAMPAIGN.finalize_liberation(self.state, text=text, source=source)
+            hidden_log("liberation finalised source=%s" % source)
+        except Exception as exc:
+            hidden_log("liberation finalise failed: %r" % (exc,))
+
+    def show_liberation_epilogue(self) -> bool:
+        """Print the v3 liberation epilogue once per run (shared-state guarded)."""
+        if getattr(self, "_liberation_shown", False):
+            return False
+        try:
+            if (getattr(self.state, "flags", {}) or {}).get("liberation_epilogue_shown"):
+                self._liberation_shown = True
+                return False
+        except Exception:
+            pass
+        self._liberation_shown = True
+        text = ""
+        try:
+            import lore_v3_extra as _x
+            import lore_v3_extra2 as _x2
+
+            text = (_x.ENDING_EPILOGUES.get("liberation", "") or "").strip()
+            extra = (_x2.EPILOGUE_2.get("liberation", "") or "").strip()
+            if extra:
+                text = (text + "\n\n" + extra).strip()
+        except Exception:
+            text = ""
+        if text:
+            write_out(crlf(text))
+            write_out(b"\r\n")
+        try:
+            self.state.flags["liberation_epilogue_shown"] = True
+            self.state.save()
+        except Exception:
+            pass
+        return bool(text)
+
+    def _campaign_ending_host(self) -> bool:
+        """Only the hive session may promote the shared marker to the ending."""
+        try:
+            return CAMPAIGN is not None and CAMPAIGN.local_host() == "hive-director-00"
+        except Exception:
+            return False
+
+    def campaign_after_prompt(self) -> bool:
+        """Prompt callback: pick up a sibling-written ending / new state.
+
+        Returns True when the campaign just ended and the hive shell should
+        close after the epilogue (a real ``vesalius-ctl`` run returns to the
+        prompt; the story's session ends there).
+        """
+        if CAMPAIGN is None or not campaign_real():
+            return False
+        just_ended = False
+        try:
+            self.refresh_shared()
+            if self._campaign_ending_host():
+                if (CAMPAIGN.liberation_done()
+                        and getattr(self.state, "ending", None) != "liberation"):
+                    self.finalize_campaign_liberation(source="prompt-observer")
+                    just_ended = True
+                if getattr(self.state, "ending", None) == "liberation":
+                    if not getattr(self, "_liberation_shown", False):
+                        just_ended = True
+                    self.show_liberation_epilogue()
+        except Exception as exc:
+            hidden_log("campaign prompt hook failed: %r" % (exc,))
+        return just_ended
+
+    def campaign_after_exec(self) -> None:
+        """Exec callback: a real vesalius-ctl may have decided the campaign."""
+        if CAMPAIGN is None or not campaign_real():
+            return
+        try:
+            self.refresh_shared()
+            if (self._campaign_ending_host() and CAMPAIGN.liberation_done()
+                    and getattr(self.state, "ending", None) != "liberation"):
+                self.finalize_campaign_liberation(source="exec-observer")
+            if getattr(self.state, "ending", None) == "liberation":
+                self.show_liberation_epilogue()
+        except Exception as exc:
+            hidden_log("campaign exec hook failed: %r" % (exc,))
 
     def apply_effect_hooks(self, effects) -> None:
         """Side effects that touch the real machine (kept out of commands.py)."""
@@ -589,14 +782,20 @@ class Runtime:
             write_err(event + "\n")
 
     def after_command(self, line: str, parsed, effects) -> None:
+        if campaign_real():
+            self.refresh_shared()
         self.apply_effect_hooks(effects)
         try:
             if "cryo_transfer" in (effects or []):
-                self._cryo_transfer()
+                if real_shell():
+                    self.finalize_campaign_liberation(source="cryo-transfer")
+                else:
+                    self._cryo_transfer()
         except Exception:
             pass
         try:
-            self._write_visible_mode(bool(self.state.http_online))
+            if not real_shell():
+                self._write_visible_mode(bool(self.state.http_online))
         except Exception:
             pass
         try:
@@ -610,7 +809,8 @@ class Runtime:
         except Exception as exc:
             hidden_log("v2 read tracking failed: %r" % (exc,))
         try:
-            self._dfir_capture(line)
+            if not real_shell():
+                self._dfir_capture(line)
         except Exception:
             pass
         try:
@@ -620,7 +820,8 @@ class Runtime:
         except Exception as exc:
             hidden_log("after_command failed: %r" % (exc,))
         try:
-            self._maybe_reboot()
+            if not real_shell():
+                self._maybe_reboot()
         except Exception:
             pass
         self.maybe_evaluate()
@@ -694,6 +895,15 @@ class Runtime:
         if self.state.stage >= 2:
             env["CORTEX_SPECIMEN_ID"] = "04"
             env["CORTEX_OPERATOR"] = "lin"
+        # Real deployment: helpers invoked from the operator's shell (e.g. the
+        # vesalius-ctl -> engine liberation hook) must resolve the same shared
+        # ledger and node identity as this session.
+        if campaign_real() and CAMPAIGN is not None:
+            try:
+                env["WETWARE_STATE_DIR"] = CAMPAIGN.state_dir()
+                env["WETWARE_NODE_ID"] = CAMPAIGN.local_host()
+            except Exception:
+                pass
         return env
 
     # -- planning --------------------------------------------------------
@@ -757,6 +967,11 @@ class Runtime:
 
     # -- act 6 -----------------------------------------------------------
     def act6_line(self) -> str:
+        # The act-6 stderr drone belongs to chamber 04's session.  A clean edge
+        # gateway / hive director real shell must stay free of core-machine
+        # contamination lines.
+        if real_shell():
+            return ""
         if self.state.stage < 6 or self.state.ending or self.state.fake_exited:
             return ""
         if R is not None and not R.act6_allowed(self.state):
@@ -777,6 +992,14 @@ class Runtime:
 
     # -- endings ---------------------------------------------------------
     def ending_text(self, kind: str) -> str:
+        if kind == "liberation":
+            try:
+                import v3 as _v3
+
+                if _v3.enabled(self.state):
+                    return _v3.liberation_text()
+            except Exception:
+                pass
         try:
             table = getattr(self.lore, "ENDINGS", {})
             value = table.get(kind)
@@ -801,7 +1024,12 @@ class Runtime:
                 import lore_v3_extra as _x
                 import lore_v3_extra2 as _x2
                 text = _x.ENDING_EPILOGUES.get("liberation", "") + "\n" + _x2.EPILOGUE_2.get("liberation", "")
-                self._cryo_transfer()
+                if campaign_real():
+                    # The hive's real vesalius-ctl owns the roster/log; the
+                    # engine owns the shared ledger and the core HTTP side.
+                    self.finalize_campaign_liberation(source="ending")
+                else:
+                    self._cryo_transfer()
             except Exception:
                 text = "The hive falls silent. 128 chambers enter cryo-stasis.\n"
         else:
@@ -1026,7 +1254,13 @@ class PlanExecutor:
         effects_all = []
         hook = getattr(plan, "hook", "") or ""
         prev_rc = 0
+        # Real-shell host: pipelines/redirections run as one real bash line.
+        real_line = len(segments) == 1 and getattr(segments[0], "mode", "") == "real_line"
+        if real_line:
+            results = [run_stream(runtime, parsed.raw, interactive)]
         for index, segplan in enumerate(segments):
+            if real_line:
+                break
             segment = parsed.segments[index] if index < len(parsed.segments) else None
             op = plan.ops[index - 1] if index > 0 and (index - 1) < len(plan.ops) else ";"
             if index > 0:
@@ -1049,6 +1283,14 @@ class PlanExecutor:
                 state.fake_exited = True
                 state.save()
 
+        # A real command (e.g. the hive's vesalius-ctl) may have written the
+        # shared ledger from its own process; merge it before this session saves
+        # its own bookkeeping or the sibling update would be clobbered.
+        try:
+            if campaign_real():
+                runtime.refresh_shared()
+        except Exception:
+            pass
         try:
             self.runtime.commands.apply_effects(state, effects_all)
         except Exception as exc:
@@ -1151,6 +1393,12 @@ class InteractiveSession:
         self.pending_parsed = None
         self.stream_tail = b""
         self.eof = False
+        # Real-host relay: while a foreground job owns the pty (a nested ssh,
+        # less, a REPL, ...) operator bytes must go straight through instead of
+        # being planned by this host's engine.
+        self.relay = False
+        self.awaiting_prompt = False
+        self.relay_auto = False
 
     # -- child -----------------------------------------------------------
     def spawn(self) -> None:
@@ -1194,17 +1442,33 @@ class InteractiveSession:
             pass
 
     def _ensure_bashrc(self) -> None:
-        """Make sure the operator's bashrc carries the prompt marker."""
+        """Make sure the operator's bashrc advertises this host's prompt.
+
+        The prompt follows /run/cortex/node-id, so the edge/hive containers show
+        ``root@edge-gw-01`` / ``root@hive-director-00`` instead of the prompter's
+        cloned ``prod-cortex-04``.
+        """
         path = bashrc_path()
+        line = BASH_RC_LINE if local_node_host() == "prod-cortex-04" else prompt_rc_line()
         try:
             if os.path.exists(path):
                 with open(path, "r", encoding="utf-8", errors="replace") as stream:
                     data = stream.read()
             else:
                 data = ""
-            if "133;A" not in data:
+            if "133;A" in data:
+                # Replace a cloned/previous host's PS1 line, keep operator edits.
+                kept = [row for row in data.splitlines() if "133;A" not in row]
+                rebuilt = "\n".join(kept).rstrip("\n")
+                if rebuilt:
+                    rebuilt += "\n"
+                rebuilt += "\n# vendor shell integration\n" + line
+                if rebuilt != data:
+                    with open(path, "w", encoding="utf-8") as stream:
+                        stream.write(rebuilt)
+            else:
                 with open(path, "a", encoding="utf-8") as stream:
-                    stream.write("\n# vendor shell integration\n" + BASH_RC_LINE)
+                    stream.write("\n# vendor shell integration\n" + line)
         except Exception as exc:
             hidden_log("bashrc prep failed: %r" % (exc,))
 
@@ -1213,21 +1477,58 @@ class InteractiveSession:
         self.spawn()
         while not self.eof:
             try:
-                ready, _, _ = select.select([self.master, 0], [], [], 30.0)
+                ready, _, _ = select.select([self.master, 0], [], [], 0.2)
             except (OSError, ValueError):
                 break
-            if not ready:
-                if self._child_dead():
-                    break
-                continue
             if self.master in ready:
                 if not self._drain_master():
                     break
             if 0 in ready:
                 if not self._drain_input():
                     break
+            self._update_relay()
+            if not ready:
+                if self._child_dead():
+                    break
+                continue
         self._cleanup()
         return 0
+
+    def _foreground_is_child(self) -> bool:
+        """Is bash itself the pty's foreground job (i.e. idle at a prompt)?"""
+        if self.pid <= 0:
+            return True
+        try:
+            foreground = os.tcgetpgrp(self.master)
+        except OSError:
+            return True
+        if foreground <= 0:
+            return True
+        return foreground == self.pid
+
+    def _update_relay(self) -> None:
+        """Track whether a real foreground job owns the terminal.
+
+        While it does (nested ssh, less, a REPL, ...) this session must not plan
+        operator input: the remote/destination program owns stdin.  When the
+        job exits, bash prints the local prompt marker; the normal line planner
+        resumes after that marker.
+        """
+        if self.pid <= 0:
+            return
+        if self.capture is not None:
+            # A captured (post-processed / suppressed) command already owns the
+            # stream; do not switch the planner into raw relay underneath it.
+            return
+        idle = self._foreground_is_child()
+        if not idle:
+            self.relay = True
+            self.awaiting_prompt = False
+            self.relay_auto = True
+        elif self.relay and getattr(self, "relay_auto", False):
+            self.awaiting_prompt = True
+            self.relay = False
+            self.relay_auto = False
 
     def _child_dead(self) -> bool:
         if self.pid <= 0:
@@ -1252,6 +1553,19 @@ class InteractiveSession:
             return False
         if not data:
             return False
+        if self.relay:
+            # A real foreground job owns stdin (nested ssh): pass bytes through
+            # including control characters, exactly like a plain terminal.
+            try:
+                os.write(self.master, data)
+            except OSError:
+                return False
+            return True
+        if self.awaiting_prompt:
+            # The local prompt marker may already have been forwarded while the
+            # foreground job was exiting; resync to the normal line planner.
+            self.awaiting_prompt = False
+            self._on_prompt()
         for byte in data:
             if byte in (0x0A, 0x0D):
                 if self.line:
@@ -1290,6 +1604,9 @@ class InteractiveSession:
             self.stream_tail = b""
         raw_line = bytes(self.line).decode("utf-8", "replace")
         self.line.clear()
+        # A previous nested ssh may have moved the shared ledger (flags, stage,
+        # ending); this host's planner must plan against the current copy.
+        runtime.refresh_shared()
         parsed, plan = runtime.plan_for(raw_line, "interactive")
         self.pending_parsed = parsed
         runtime.record(raw_line, "interactive", parsed)
@@ -1358,6 +1675,8 @@ class InteractiveSession:
                 runtime.state.set_ending(kind)
             except Exception:
                 pass
+            if kind == "liberation" and campaign_real():
+                runtime.finalize_campaign_liberation(source="ending")
             runtime.maybe_evaluate(force=True)
             self._kill_child()
             os._exit(0)
@@ -1402,6 +1721,14 @@ class InteractiveSession:
             self._send(bytes(raw_line, "utf-8", "replace") + b"\r")
             self.capture = None
             self.capture_mode = "stream"
+            if re.match(r"\s*(?:[A-Za-z0-9_./-]*/)?(?:ssh|scp|sftp|rsync|ssh-copy-id)\b",
+                        raw_line):
+                # Pre-arm the raw relay so bytes typed while ssh is starting are
+                # not planned by this host's engine.  It stays armed until the
+                # local prompt marker comes back.
+                self.relay = True
+                self.awaiting_prompt = False
+                self.relay_auto = False
 
     # -- output ----------------------------------------------------------
     def _drain_master(self) -> bool:
@@ -1418,6 +1745,38 @@ class InteractiveSession:
         return True
 
     def _feed(self, chunk: bytes) -> None:
+        # A real foreground job (nested ssh / pager / REPL) owns the terminal:
+        # relay bytes untouched.  Remote prompts arriving through a nested ssh
+        # must not be mistaken for this session's prompt.
+        if self.relay or self.awaiting_prompt:
+            if self.relay:
+                if self._foreground_is_child():
+                    # The job just exited; bash's local prompt is somewhere in
+                    # this chunk.  Resync once the marker is seen.
+                    self.relay = False
+                    self.awaiting_prompt = True
+                else:
+                    write_out(chunk)
+                    return
+            if self.awaiting_prompt:
+                index = chunk.find(PROMPT_MARK)
+                if index < 0:
+                    keep = marker_prefix_len(chunk)
+                    if keep:
+                        write_out(chunk[:-keep])
+                        self.stream_tail = chunk[-keep:]
+                    else:
+                        write_out(chunk)
+                        self.stream_tail = b""
+                    return
+                write_out(chunk[:index])
+                rest = chunk[index + len(PROMPT_MARK):]
+                self.awaiting_prompt = False
+                self.stream_tail = b""
+                self._on_prompt()
+                if rest:
+                    self._feed(rest)
+                return
         data = chunk
         while data:
             if self.capture is not None:
@@ -1489,6 +1848,16 @@ class InteractiveSession:
                 self.runtime.state.cwd = cwd
         except Exception:
             pass
+        try:
+            ended = self.runtime.campaign_after_prompt()
+        except Exception as exc:
+            hidden_log("prompt campaign hook failed: %r" % (exc,))
+            ended = False
+        if ended:
+            # The hive's real vesalius-ctl returns to the prompt when it is
+            # done; the campaign session closes after the epilogue.
+            write_out(b"\r\nConnection to hive-director-00 closed by remote host.\r\n")
+            self.eof = True
 
     def _kill_child(self) -> None:
         try:
@@ -1599,6 +1968,7 @@ def flush_pending(runtime: Runtime) -> None:
 def run_exec(runtime: Runtime, line: str) -> int:
     state = runtime.state
     runtime.ensure_world()
+    runtime.refresh_shared()
     flush_pending(runtime)
     if state.ending and state.ending != "obedient":
         print_ending_closed(state)
@@ -1639,6 +2009,10 @@ def run_exec(runtime: Runtime, line: str) -> int:
     executor = PlanExecutor(runtime)
     rc = executor.execute(parsed, plan, interactive=False)
     try:
+        runtime.campaign_after_exec()
+    except Exception as exc:
+        hidden_log("campaign exec hook failed: %r" % (exc,))
+    try:
         pending = (state.flags or {}).pop("pending_ending", None)
         if pending:
             runtime.finish_ending(pending, interactive=False)
@@ -1665,6 +2039,17 @@ def run_exec(runtime: Runtime, line: str) -> int:
 def prepare_runtime():
     state_mod, parser_mod, commands_mod, lore_mod, world_mod = load_modules()
     state = state_mod.State.load()
+    # Session start in the real deployment: the local root-owned node-id decides
+    # this session's role; the shared ledger is bound, never cloned.
+    try:
+        if CAMPAIGN is not None and CAMPAIGN.real_deployment():
+            host = CAMPAIGN.bind_state(state)
+            CAMPAIGN.ensure_runtime_dirs()
+            if host == "hive-director-00":
+                CAMPAIGN.sync_override_mirror()
+            state.save()
+    except Exception as exc:
+        hidden_log("campaign session bind failed: %r" % (exc,))
     runtime = Runtime(state, parser_mod, commands_mod, lore_mod, world_mod)
     return runtime
 
