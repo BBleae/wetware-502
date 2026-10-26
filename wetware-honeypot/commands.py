@@ -1634,8 +1634,30 @@ def _plan_firewall(state: Any, argv: List[str], cmd: str) -> SegPlan:
 # plan / apply_effects / postprocess
 # ---------------------------------------------------------------------------
 
+_POD_STORY_COMMANDS = {
+    "systemctl", "kill", "pkill", "killall", "service", "resuscitate.sh",
+    "euthanize_wetware", "lock_compliance", "reveal_simulation", "journalctl",
+    "nginx", "ssh", "scp", "sftp", "crontab", "curl", "wget", "nc", "ncat",
+    "netcat", "ping", "traceroute",
+}
+
+
 def plan(state: Any, parsed: Any, source: str) -> Plan:
     """对整行命令产出一个 Plan。纯函数：不修改 state。"""
+    # Inside the kernel pod the shell is real: pass everything except the
+    # scenario's own verbs through untouched so /proc, PIDs and sockets agree.
+    if os.environ.get("CORTEX_POD") == "1":
+        try:
+            segs = getattr(parsed, "segments", None) or []
+            names = []
+            for _seg in segs:
+                _argv = _seg.stages[0].argv if getattr(_seg, "stages", None) else []
+                names.append(os.path.basename(str(_argv[0])) if _argv else "")
+            if names and not any(n in _POD_STORY_COMMANDS for n in names):
+                pod_segs = [_real_post("pod_dmesg") if n == "dmesg" else _real() for n in names]
+                return Plan(segs=pod_segs, ops=list(getattr(parsed, "ops", []) or []))
+        except Exception:
+            pass
     segs_out: List[SegPlan] = []
     ops: List[str] = list(getattr(parsed, "ops", []) or [])
     posts: List[str] = []
@@ -1983,6 +2005,11 @@ def postprocess(state: Any, parsed: Any, real_out: bytes) -> bytes:
                             injected = True
                             break
                 return "\n".join(out_lines).encode("utf-8")
+
+        if cmd == "dmesg":
+            keep = [ln for ln in text.split("\n")
+                    if "systemd[1]" not in ln and "audit: type=1400" not in ln]
+            return "\n".join(keep).encode("utf-8")
 
         if cmd == "journalctl":
             # 过滤敏感行（inquisitor/wetware 字样在 stage<2 时滤掉）

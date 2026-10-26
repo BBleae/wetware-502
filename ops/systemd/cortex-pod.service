@@ -1,0 +1,15 @@
+[Unit]
+Description=WETWARE-502 node namespace pod
+After=local-fs.target
+Before=cortex-node-agent.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/cortex-agent/ops/cortex_pod.sh
+Restart=always
+RestartSec=2
+TimeoutStopSec=10
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

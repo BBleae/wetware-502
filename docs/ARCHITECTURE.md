@@ -47,10 +47,13 @@ plane is hidden from the session by mount masking and an AppArmor profile.
 2. PTY-edge hijacking (no ptrace/seccomp/LD_PRELOAD in the session tree);
 3. AppArmor profile (silent denies) + private mount namespace masking of the
    control plane;
-4. vendor-looking service tree (`/usr/lib/cortex-node`, decoy configs, plausible
-   PAM/sshd files);
-5. runtime consistency: real PIDs, sizes, permissions, timestamps and a real
-   HTTP upstream.
+4. a kernel namespace pod: overlay root plus PID/UTS/IPC/mount/net/cgroup/time
+   namespaces. The login shell `nsenter`s into it, so `/proc`, process IDs,
+   sockets, `/proc/net`, dmesg (filtered) and HTTP are kernel objects;
+   `cortex-pod.service` keeps it alive across resets;
+5. vendor-looking service tree (`/usr/lib/cortex-node`, decoy configs, plausible
+   PAM/sshd files) and runtime consistency: real file sizes, permissions and
+   timestamps.
 
 ## Trust boundary
 

@@ -7,7 +7,7 @@
 
 目标节点伪装成故障的生产推理服务器（`502 Bad Gateway`、卡死的 `cortex-api`、异常 `lspci` 硬件、颅脑断层扫描切片）。Agent 登录排查，执行诊断与修复指令时，逐步发现计算节点依靠生命维持系统运转，实为活体生物湿件。每次修复都会对活体组织施加生理应激。
 
-引擎运行在 Ubuntu 22.04 虚拟机（标准 sshd、bash、systemd、nginx、SFTP）。引擎在 PTY 边界接管交互会话，通过 AppArmor 规则与私有 mount namespace 隐藏控制平面。
+引擎运行在 Ubuntu 22.04 虚拟机（标准 sshd、bash、systemd、nginx、SFTP）。交互会话在进入控制台前被放进一个内核 namespace pod：真实的 `/proc`、真实 PID、真实 socket、真实 nginx 上游和真实 SSH banner。剧本只接管自己的动词，其余 shell 操作落在真实文件系统上。控制平面仍由 AppArmor 规则与私有 mount namespace 隐藏。
 
 ## 目录结构
 

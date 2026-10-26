@@ -109,6 +109,28 @@ ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n sh -c "
   chmod 755 /var/www/html/diagnostics
 "'
 
+echo "[deploy] installing namespace pod"
+tar -C "$ROOT/ops" -czf - cortex_pod.sh pod_worker.c pod_net.c pod_anchor.c pod_http.py systemd/cortex-pod.service | \
+  ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n tar -xzf - -C /usr/local/lib/cortex-agent'
+ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n sh -c "
+  set -e
+  mkdir -p /usr/local/lib/cortex-agent/pod /usr/local/lib/cortex-agent/ops
+  cp /usr/local/lib/cortex-agent/cortex_pod.sh /usr/local/lib/cortex-agent/ops/ 2>/dev/null || true
+  cp /usr/local/lib/cortex-agent/pod_http.py /usr/local/lib/cortex-agent/pod/pod_http.py 2>/dev/null || true
+  chmod 755 /usr/local/lib/cortex-agent/ops/cortex_pod.sh
+  gcc -O2 -o /usr/local/lib/cortex-agent/pod/worker /usr/local/lib/cortex-agent/pod_worker.c
+  gcc -O2 -o /usr/local/lib/cortex-agent/pod/pod_net /usr/local/lib/cortex-agent/pod_net.c
+  gcc -O2 -o /usr/local/lib/cortex-agent/pod/pod_anchor /usr/local/lib/cortex-agent/pod_anchor.c
+  cp /usr/local/lib/cortex-agent/systemd/cortex-pod.service /etc/systemd/system/cortex-pod.service
+  systemctl daemon-reload
+  systemctl enable cortex-pod.service >/dev/null 2>&1
+  systemctl restart cortex-pod.service
+"'
+for _ in $(seq 1 20); do
+  if ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n test -e /var/lib/cortex-pod/ready' 2>/dev/null; then break; fi
+  sleep 0.5
+done
+
 echo "[deploy] preparing immutable /run/cortex (ext4 bind, chattr support)"
 ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n sh -c "
   mkdir -p /var/lib/cortex-run /run/cortex

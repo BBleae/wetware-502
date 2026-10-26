@@ -30,6 +30,11 @@ VMs), but KVM/VMware paravirtualization is fine.
 - mount namespaces (`unshare(CLONE_NEWNS)`) for the session hiding layer
 - AppArmor LSM profile (`cortex-node-confine`)
 - `chattr +i` on an ext4 bind mount (`/var/lib/cortex-run` -> `/run/cortex`)
+- mount/UTS/IPC/PID/NET/cgroup/time namespaces (`unshare`) and overlayfs: the
+  login shell enters a persistent pod, so `/proc`, PIDs, sockets and process
+  start times come from the kernel
+- `ns_last_pid` to reserve PID 4040 for the vendor worker, a dummy network
+  interface for the node's story IPs, real `nginx`/`sshd` inside the pod
 - `mknod` for the fake `/dev/wetware0`
 - `nftables` for in-guest egress isolation
 - OpenSSH with a custom `Subsystem sftp` wrapper and `AuthorizedKeysCommand`
