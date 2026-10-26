@@ -70,11 +70,21 @@ static void enter_pod(int argc, char **argv) {
     char **args;
     size_t i;
     int k = 0;
+    int wait;
 
     if (getenv("CORTEX_POD_ENTER")) return;
     if (campaign_enabled()) return;
-    if (access(POD_READY, F_OK) != 0) return;
-    pid = pod_anchor_pid();
+    /* A deploy/reset briefly replaces ready/anchor.pid.  Wait for a valid
+     * anchor instead of falling back to the host story planner, whose output
+     * would visibly contradict the pod's real /proc. */
+    pid = -1;
+    for (wait = 0; wait < 40; wait++) {
+        if (access(POD_READY, F_OK) == 0) {
+            pid = pod_anchor_pid();
+            if (pid > 0) break;
+        }
+        usleep(100000);
+    }
     if (pid <= 0) return;
     if (access("/usr/bin/nsenter", X_OK) != 0) return;
     if (access("/usr/sbin/chroot", X_OK) != 0) return;
@@ -97,6 +107,18 @@ static void enter_pod(int argc, char **argv) {
     for (i = 0; i < (size_t)argc; i++) args[k++] = argv[i];
     args[k] = NULL;
 
+    /* Join the node's service cgroup, so the console is not visibly a host
+     * logind session.  Failure is harmless (the pod console stays usable). */
+    {
+        const char *procs = "/sys/fs/cgroup/system.slice/cortex-pod.service/cgroup.procs";
+        int fd = open(procs, O_WRONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            char selfbuf[24];
+            int n = snprintf(selfbuf, sizeof(selfbuf), "%d", (int)getpid());
+            if (n > 0) (void)write(fd, selfbuf, (size_t)n);
+            close(fd);
+        }
+    }
     setenv("CORTEX_POD_ENTER", "1", 1);
     setenv("CORTEX_POD", "1", 1);
     execv("/usr/bin/nsenter", args);

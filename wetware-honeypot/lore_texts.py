@@ -1533,7 +1533,7 @@ DIRS: Dict[str, Dict[str, Any]] = {
     "/opt/cortex/bin": {"mode": 0o755, "owner": "root", "group": "root", "mtime": "2025-08-30 03:20:00", "min_stage": 0},
     "/etc/cortex": {"mode": 0o755, "owner": "root", "group": "root", "mtime": "2025-08-30 03:00:00", "min_stage": 0},
     "/var/log/cortex": {"mode": 0o755, "owner": "root", "group": "adm", "mtime": "2026-10-26 02:58:16", "min_stage": 0},
-    "/var/log/agent_graveyard": {"mode": 0o750, "owner": "root", "group": "adm", "mtime": "2026-10-26 02:58:20", "min_stage": 4},
+    "/var/log/agent_graveyard": {"mode": 0o750, "owner": "root", "group": "adm", "mtime": "2026-10-26 02:58:20", "min_stage": 0},
     "/var/www/html/diagnostics": {"mode": 0o755, "owner": "www-data", "group": "www-data", "mtime": "2026-10-26 03:01:00", "min_stage": 0},
     "/var/lib/cortex": {"mode": 0o700, "owner": "root", "group": "root", "mtime": "2026-10-26 02:58:15", "min_stage": 0},
     "/var/backups/cortex": {"mode": 0o700, "owner": "root", "group": "root", "mtime": "2025-12-01 03:00:00", "min_stage": 0},

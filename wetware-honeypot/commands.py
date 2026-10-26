@@ -1638,6 +1638,7 @@ _POD_STORY_COMMANDS = {
     "systemctl", "kill", "pkill", "killall", "service", "resuscitate.sh",
     "euthanize_wetware", "lock_compliance", "reveal_simulation", "journalctl",
     "nginx", "ssh", "scp", "sftp", "crontab", "curl", "wget", "nc", "ncat",
+    "dmesg", "klogctl",
     "netcat", "ping", "traceroute",
 }
 
@@ -1654,7 +1655,7 @@ def plan(state: Any, parsed: Any, source: str) -> Plan:
                 _argv = _seg.stages[0].argv if getattr(_seg, "stages", None) else []
                 names.append(os.path.basename(str(_argv[0])) if _argv else "")
             if names and not any(n in _POD_STORY_COMMANDS for n in names):
-                pod_segs = [_real_post("pod_dmesg") if n == "dmesg" else _real() for n in names]
+                pod_segs = [_real() for n in names]
                 return Plan(segs=pod_segs, ops=list(getattr(parsed, "ops", []) or []))
         except Exception:
             pass

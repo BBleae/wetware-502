@@ -71,7 +71,7 @@ PROMPT_VISIBLE = "\\[\\e[01;32m\\]root@prod-cortex-04\\[\\e[00m\\]:\\[\\e[01;34m
 BASH_RC_LINE = "PS1='\\[\\e]133;A\\a\\]" + PROMPT_VISIBLE + "'\n"
 
 # Absolute implementation paths the operator must never see.
-MASK_DIRS = [LIB_DIR, STATE_DIR]
+MASK_DIRS = [LIB_DIR, STATE_DIR, "/var/lib/cortex-pod"]
 # Files whose real content would reveal the control plane are replaced with
 # plausible vendor decoys (stored inside the hidden tree) for confined sessions.
 MASK_FILES = {
@@ -280,6 +280,21 @@ def mask_namespace() -> None:
             rc = libc.mount(source.encode(), path.encode(), None, MS_BIND, None)
             if rc != 0:
                 hidden_log("bind mask failed %s errno=%s" % (path, ctypes.get_errno()))
+        # The host kernel ring is not part of this node's fiction.  Bind
+        # /dev/null over the character device and the proc interface before
+        # the shell runs; dmesg itself is answered by the story planner.
+        for _kmsg in ("/var/log/kern.log", "/var/log/dmesg"):
+            try:
+                if os.path.exists(_kmsg):
+                    libc.mount(b"/dev/null", _kmsg.encode(), None, MS_BIND, None)
+            except Exception:
+                pass
+        for _jpath in ("/run/log/journal", "/var/log/journal", "/run/systemd/journal"):
+            try:
+                if os.path.isdir(_jpath):
+                    libc.mount(b"tmpfs", _jpath.encode(), b"tmpfs", 0, b"mode=0700,uid=0,gid=0")
+            except Exception:
+                pass
         for path in MASK_DIRS:
             if not os.path.isdir(path):
                 continue

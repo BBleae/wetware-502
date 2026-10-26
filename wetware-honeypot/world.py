@@ -781,7 +781,11 @@ class World:
                     os.unlink(path)
             except Exception as exc:
                 self._log(exc)
+        _keep_dirs = ("/var/log/agent_graveyard", "/var/www/html/diagnostics",
+                      "/var/www/html", "/opt/cortex", "/opt/cortex/bin", "/var/log/cortex")
         for logical in sorted(lore_texts.DIRS, key=lambda p: -p.count("/")):
+            if logical.rstrip("/") in _keep_dirs:
+                continue
             try:
                 path = self._p(logical)
                 if os.path.isdir(path) and not os.path.islink(path):

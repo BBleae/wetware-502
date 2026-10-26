@@ -72,6 +72,17 @@ def main():
                 pass
     except Exception:
         pass
+    try:
+        import os as _os
+        _os.makedirs("/var/log/agent_graveyard", exist_ok=True)
+    except Exception:
+        pass
+    try:
+        import os as _os
+        for _d in ("/var/log/agent_graveyard", "/var/www/html/diagnostics"):
+            _os.makedirs(_d, exist_ok=True)
+    except Exception:
+        pass
     print("节点状态已重置。")
 
 

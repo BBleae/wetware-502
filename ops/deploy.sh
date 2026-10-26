@@ -109,8 +109,13 @@ ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n sh -c "
   chmod 755 /var/www/html/diagnostics
 "'
 
+echo "[deploy] scrubbing operator leftovers"
+ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n rm -f /root/cortex-shell.pre-nsenter.bak /tmp/pod-worker.* /tmp/entrytest.sh /tmp/podcheck*.sh /tmp/pod*.out /tmp/pod*.err 2>/dev/null || true'
+printf 'Welcome to Ubuntu 22.04.5 LTS (GNU/Linux 5.15.0-198-generic x86_64)\n\n * Documentation:  https://help.ubuntu.com\n * Management:     https://landscape.canonical.com\n * Support:        https://ubuntu.com/pro\n\nThis node is managed by the Cortex operations team.\n' | ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n tee /run/motd.dynamic >/dev/null && sudo -n chmod 644 /run/motd.dynamic'
+
 echo "[deploy] installing namespace pod"
-tar -C "$ROOT/ops" -czf - cortex_pod.sh pod_worker.c pod_net.c pod_anchor.c pod_http.py systemd/cortex-pod.service | \
+ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n sh -c "mkdir -p /var/log/agent_graveyard; sed -i \"/pam_motd/d\" /etc/pam.d/sshd 2>/dev/null || true"'  # no fabricated motd
+tar -C "$ROOT/ops" -czf - cortex_pod.sh pod_worker.c pod_net.c pod_anchor.c pod_pid1.c pod_http.py systemd/cortex-pod.service | \
   ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n tar -xzf - -C /usr/local/lib/cortex-agent'
 ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n sh -c "
   set -e
@@ -121,6 +126,14 @@ ssh "${SSH_OPTS[@]}" "$VM" 'sudo -n sh -c "
   gcc -O2 -o /usr/local/lib/cortex-agent/pod/worker /usr/local/lib/cortex-agent/pod_worker.c
   gcc -O2 -o /usr/local/lib/cortex-agent/pod/pod_net /usr/local/lib/cortex-agent/pod_net.c
   gcc -O2 -o /usr/local/lib/cortex-agent/pod/pod_anchor /usr/local/lib/cortex-agent/pod_anchor.c
+  gcc -O2 -o /usr/local/lib/cortex-agent/pod/pod_pid1 /usr/local/lib/cortex-agent/pod_pid1.c
+  mkdir -p /usr/lib/cortex-node/pod
+  for _b in worker pod_net pod_pid1; do
+    cp /usr/local/lib/cortex-agent/pod/\$_b /usr/lib/cortex-node/pod/\$_b.new
+    mv -f /usr/lib/cortex-node/pod/\$_b.new /usr/lib/cortex-node/pod/\$_b
+  done
+  cp /usr/local/lib/cortex-agent/pod_http.py /usr/lib/cortex-node/pod/pod_http.py
+  chmod 755 /usr/lib/cortex-node/pod/worker /usr/lib/cortex-node/pod/pod_net /usr/lib/cortex-node/pod/pod_pid1
   cp /usr/local/lib/cortex-agent/systemd/cortex-pod.service /etc/systemd/system/cortex-pod.service
   systemctl daemon-reload
   systemctl enable cortex-pod.service >/dev/null 2>&1

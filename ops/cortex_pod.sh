@@ -16,10 +16,12 @@ R=/var/lib/cortex-pod
 hostname prod-cortex-04
 mount -t proc proc "$R/root/proc"
 mount -t sysfs sysfs "$R/root/sys" 2>/dev/null || true
+mount -t securityfs securityfs "$R/root/sys/kernel/security" 2>/dev/null || true
+
 mount -t tmpfs tmpfs "$R/root/dev/shm" 2>/dev/null || true
 mount --rbind /dev "$R/root/dev"
 mount --rbind /run "$R/root/run" 2>/dev/null || true
-for _d in /var/lib/cortex-agent /var/log /var/lib/cortex-run /var/www/html; do
+for _d in /var/lib/cortex-agent /var/log/cortex /var/log/agent_graveyard /var/lib/cortex-run /var/www/html; do
   [ -d "$_d" ] && mount --bind "$_d" "$R/root$_d" 2>/dev/null || true
 done
 for _f in /usr/local/lib/cortex-agent /usr/local/bin/cortex-shell /usr/lib/cortex-node; do
@@ -34,7 +36,7 @@ ip addr add 10.66.0.1/24 dev cortex0 2>/dev/null || true
 mkdir -p "$R/root/run/cortex" "$R/root/var/log/nginx" "$R/root/run/sshd"
 cp -f /usr/local/lib/cortex-agent/pod/story_worker "$R/root/opt/cortex/bin/synapse_worker" 2>/dev/null || true
 echo 4039 > "$R/root/proc/sys/kernel/ns_last_pid" 2>/dev/null || true
-/usr/sbin/chroot "$R/root" /opt/cortex/bin/synapse_worker synapse_worker --mode=production --bind-cortex=/dev/wetware0 >/tmp/pod-worker.out 2>/tmp/pod-worker.err &
+env -i PATH=/usr/bin:/bin HOME=/root /usr/sbin/chroot "$R/root" /opt/cortex/bin/synapse_worker synapse_worker --mode=production --bind-cortex=/dev/wetware0 >/tmp/pod-worker.out 2>/tmp/pod-worker.err &
 sleep 0.2
 mount --bind /opt/cortex "$R/root/opt/cortex" 2>/dev/null || true
 # A real nginx returns the 502 that the story is about.
@@ -51,11 +53,11 @@ http {
   }
 }
 NGX
-/usr/sbin/chroot "$R/root" /usr/bin/python3 /usr/local/lib/cortex-agent/pod/pod_http.py >/dev/null 2>&1 &
+/usr/sbin/chroot "$R/root" /usr/bin/python3 /usr/lib/cortex-node/pod/pod_http.py >/dev/null 2>&1 &
 /usr/sbin/chroot "$R/root" /usr/sbin/nginx -c /etc/nginx/pod.conf 2>/dev/null || true
 # Story-shaped background processes (real PIDs in this namespace).
 for spec in "cortex-api --mode=production" "inquisitor_daemon --watch-agent=84"; do
-  /usr/sbin/chroot "$R/root" /usr/local/lib/cortex-agent/pod/worker $spec >/dev/null 2>&1 &
+  /usr/sbin/chroot "$R/root" /usr/lib/cortex-node/pod/worker $spec >/dev/null 2>&1 &
 done
 cat > "$R/root/etc/ssh/pod_sshd_config" <<'SSHD'
 Port 22
@@ -70,9 +72,9 @@ LogLevel ERROR
 SSHD
 /usr/sbin/chroot "$R/root" /usr/sbin/sshd -D -f /etc/ssh/pod_sshd_config >/dev/null 2>&1 &
 sleep 0.3
-/usr/sbin/chroot "$R/root" /usr/local/lib/cortex-agent/pod/pod_net client "sshd: root@pts/0" >/dev/null 2>&1 &
+/usr/sbin/chroot "$R/root" /usr/lib/cortex-node/pod/pod_net client "sshd: root@pts/0" >/dev/null 2>&1 &
 
-exec sleep infinity
+exec env -i PATH=/usr/bin:/bin HOME=/root /usr/lib/cortex-node/pod/pod_pid1
 INNER
 chmod 755 "$ROOT/inner.sh"
 # vendor-sized worker used for PID 4040 (bind-mounted at the story path)

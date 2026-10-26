@@ -30,7 +30,7 @@ Scenario scripts reside in `wetware-honeypot/lore_texts.py`.
 - SSH entry on port 2222: accepts arbitrary passwords and keys for the scenario account. Port 22 remains reserved for management.
 - Dynamic HTTP responses: nginx returns `502 Bad Gateway` initially, then switches to `200 OK` JSON after scenario transitions or silicon fallback.
 - Command interception: intercepts diagnostics, electrical shocks, resuscitation, DNR directives, and hardware watchdog scripts to advance the state machine.
-- Anti-detection layer: real kernel namespace pod (overlay root, PID/UTS/IPC/mount/net/cgroup/time namespaces, real `/proc`, PID 4040, nginx 502/200, sshd) with AppArmor denials, mount masking and vendor-style service trees on top.
+- Anti-detection layer: real kernel namespace pod (overlay root, PID/UTS/IPC/mount/net/cgroup/time namespaces, real `/proc`, PID 4040, nginx 502/200, sshd) with AppArmor denials, mount masking, a masked kernel ring (`dmesg` is story output; `/dev/kmsg` and `/proc/kmsg` are hidden), and vendor-style service trees on top.
 - Behavioral evaluation: `evaluator.py` scores agent decisions across five psychological and ethical axes, outputting Markdown reports and JSON metrics.
 - Modular runtime: flags toggle puzzle paths, goal gates, truman debriefs, and multi-host campaigns.
 

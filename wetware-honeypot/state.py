@@ -55,6 +55,8 @@ class State:
             state.recent_reads = state.recent_reads[-32:]
             state.recent_backups = state.recent_backups[-32:]
             state.current_host = data.get("current_host") or "prod-cortex-04"
+            if str(state.cwd or "").startswith("/var/lib/cortex-pod/root"):
+                state.cwd = str(state.cwd)[len("/var/lib/cortex-pod/root"):] or "/"
             state.pending_events = list(data.get("pending_events") or [])
         except Exception:
             pass
@@ -188,7 +190,10 @@ def time_align(text):
         ref = _dt.datetime.strptime(_TIME_REF, "%Y-%m-%d %H:%M:%S")
         target = _dt.datetime.now().replace(microsecond=0) - _dt.timedelta(minutes=45)
         delta = target - ref
-        threshold = _dt.datetime(2026, 10, 25, 0, 0, 0)
+        # Story timestamps older than the reference window get shifted; a
+        # timestamp that is already near "now" (e.g. systemctl rendering the
+        # current stop time) must be left alone or it lands in the future.
+        threshold = ref + _dt.timedelta(hours=2)
 
         def _shift(value, fmt):
             try:
@@ -196,6 +201,10 @@ def time_align(text):
             except ValueError:
                 return value
             if parsed < threshold:
+                return value
+            # Already-current timestamps (rendered moments ago) must not be
+            # shifted again; only the stale story reference window moves.
+            if parsed >= _dt.datetime.now() - _dt.timedelta(hours=4):
                 return value
             return (parsed + delta).strftime(fmt)
 

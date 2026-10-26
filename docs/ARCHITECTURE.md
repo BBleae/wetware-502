@@ -50,7 +50,9 @@ plane is hidden from the session by mount masking and an AppArmor profile.
 4. a kernel namespace pod: overlay root plus PID/UTS/IPC/mount/net/cgroup/time
    namespaces. The login shell `nsenter`s into it, so `/proc`, process IDs,
    sockets, `/proc/net`, dmesg (filtered) and HTTP are kernel objects;
-   `cortex-pod.service` keeps it alive across resets;
+   `cortex-pod.service` keeps it alive across resets; the kernel ring itself is
+   hidden (`/dev/kmsg` and `/proc/kmsg` are masked, `dmesg` is answered by the
+   story planner), so boot messages and host PIDs do not leak through;
 5. vendor-looking service tree (`/usr/lib/cortex-node`, decoy configs, plausible
    PAM/sshd files) and runtime consistency: real file sizes, permissions and
    timestamps.

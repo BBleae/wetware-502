@@ -17,8 +17,6 @@ account    include      common-account
 @include common-session
 
 # Print the message of the day upon successful login.
-session    optional     pam_motd.so  motd=/run/motd.dynamic
-session    optional     pam_motd.so noupdate
 session    optional     pam_mail.so standard noenv # [1]
 
 # Set up user limits from /etc/security/limits.conf.

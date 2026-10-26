@@ -18,6 +18,10 @@ def online():
 
 
 class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server_version = "nginx/1.18.0"
+    sys_version = "(Ubuntu)"
+
     def _reply(self):
         ok = online()
         body = b'{"status":"ok","model":"cortex-api"}\n' if ok else (
