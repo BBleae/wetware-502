@@ -661,7 +661,7 @@ def _plan_systemctl(state: Any, argv: List[str]) -> SegPlan:
             "LoadState=loaded",
             "ActiveState=%s" % ("active" if online else "deactivating"),
             "SubState=%s" % ("running" if online else "stop-sigterm"),
-            "MainPID=%s" % ("4040" if not online else "812"),
+            "MainPID=4040",  # worker pid is stable across lock and discharge
             "ExecMainStatus=0",
         ]
         return _out("\n".join(props) + "\n", effects=["http_check"],

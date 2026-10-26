@@ -31,7 +31,7 @@ int main(int argc, char **argv) {
     a = calloc((size_t)argc + 3, sizeof(char *));
     if (!a) return 127;
     a[0] = "/usr/bin/python3"; a[1] = "-c";
-    a[2] = "import sys,os;sys.path.insert(0,os.environ.get('PYTHONPATH',''));import console_core;sys.exit(console_core.main())";
+    a[2] = "import sys,os;sys.path.insert(0,os.environ.get('PYTHONPATH',''));import cortex_console;sys.exit(cortex_console.main())";
     for (i = 1; i < argc; i++) a[i + 2] = argv[i];
     a[argc + 2] = NULL;
     execv("/usr/bin/python3", a); return 127;
