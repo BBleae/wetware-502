@@ -12,6 +12,8 @@ __pycache__/
 
 # generated / runtime
 wetware-honeypot/assets/*
+!wetware-honeypot/assets/plates/
+!wetware-honeypot/assets/plates/*.jpg
 !wetware-honeypot/assets/.gitkeep
 wetware-honeypot/assets_dev/
 reports/
@@ -19,6 +21,7 @@ testrun/
 *.log
 *.png
 !docs/**/*.png
+!wetware-honeypot/assets/plates/*.png
 
 # OS / editor
 .DS_Store

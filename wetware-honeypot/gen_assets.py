@@ -139,6 +139,175 @@ def _fit_font(draw: Any, text: str, max_w: int, start: int, minimum: int = 10):
 
 
 # ---------------------------------------------------------------------------
+# 等宽字体（OSD/打字机叠加优先用）
+# ---------------------------------------------------------------------------
+
+_MONO_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+    "/System/Library/Fonts/Menlo.ttc",
+    "/System/Library/Fonts/SFNSMono.ttf",
+    "/System/Library/Fonts/Supplemental/Courier New.ttf",
+]
+
+
+def _mono(size: int):
+    """加载等宽字体；全失败回退 _font（保持可用性）。"""
+    if not _HAS_PIL:
+        return None
+    for path in _MONO_CANDIDATES:
+        try:
+            if os.path.exists(path):
+                return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return _font(size)
+
+
+# ---------------------------------------------------------------------------
+# 照片底版：assets/plates/<name>.jpg -> 900x600 RGB（带进程级缓存）
+# ---------------------------------------------------------------------------
+
+_PLATE_CACHE: Dict[str, Any] = {}
+
+
+def _plates_dir() -> str:
+    d = os.environ.get("WETWARE_PLATES_DIR")
+    if d:
+        return str(d)
+    try:
+        here = os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        here = "."
+    return os.path.join(here, "assets", "plates")
+
+
+def _plate(name: str) -> Any:
+    """读底版 jpg，等比缩放+居中裁切到 (W, H)。任何失败返回 None（调用方回退矢量画法）。"""
+    if not _HAS_PIL:
+        return None
+    if name in _PLATE_CACHE:
+        cached = _PLATE_CACHE[name]
+        return cached.copy() if cached is not None else None
+    img = None
+    try:
+        path = os.path.join(_plates_dir(), name + ".jpg")
+        im = Image.open(path)
+        im.load()
+        im = im.convert("RGB")
+        scale = max(W / im.width, H / im.height)
+        nw = max(1, int(round(im.width * scale)))
+        nh = max(1, int(round(im.height * scale)))
+        im = im.resize((nw, nh), Image.BILINEAR)
+        x0, y0 = (nw - W) // 2, (nh - H) // 2
+        img = im.crop((x0, y0, x0 + W, y0 + H))
+    except Exception:
+        img = None
+    _PLATE_CACHE[name] = img
+    return img.copy() if img is not None else None
+
+
+# ---------------------------------------------------------------------------
+# 统一复古劣化（仅底版分支走这里；矢量回退保持原样）
+# ---------------------------------------------------------------------------
+
+_RETRO_SCALE = 0.72      # 低像素缩放往返
+_RETRO_SCAN_EVERY = 3    # 每 3 行一条扫描线
+_RETRO_SCAN_FACTOR = 0.93
+_RETRO_NOISE_SIGMA = 4.0
+_RETRO_VIGNETTE = 0.38   # 四角暗角强度（0-1）
+_RETRO_CONTRAST = 1.05
+
+
+def _retro_scanline_mask() -> Any:
+    """H×W 灰度掩码：正常行 255，每 3 行压暗到 factor。"""
+    row_vals = []
+    for y in range(H):
+        row_vals.append(255 if (y % _RETRO_SCAN_EVERY) else int(255 * _RETRO_SCAN_FACTOR))
+    col = Image.new("L", (1, H))
+    col.putdata(row_vals)
+    return col.resize((W, H), Image.NEAREST)
+
+
+def _retro_vignette_mask() -> Any:
+    """四角暗角掩码（0=中心不压暗，255=边角最暗处）。"""
+    try:
+        base = Image.radial_gradient("L").resize((W, H), Image.BILINEAR)
+        return base.point(lambda v: int(v * _RETRO_VIGNETTE))
+    except Exception:
+        return Image.new("L", (W, H), 0)
+
+
+def _retro_finish(img: Any) -> Any:
+    """统一复古劣化：缩放往返 / 扫描线 / 高斯噪点 / 色差 / 暗角 / 提对比。返回新 Image。"""
+    if not _HAS_PIL or img is None:
+        return img
+    try:
+        from PIL import ImageChops, ImageEnhance
+        out = img.copy() if img.mode == "RGB" else img.convert("RGB")
+        # 1) 低像素感：0.72 倍缩小再放大（BILINEAR）
+        sw, sh = max(1, int(round(W * _RETRO_SCALE))), max(1, int(round(H * _RETRO_SCALE)))
+        out = out.resize((sw, sh), Image.BILINEAR).resize((W, H), Image.BILINEAR)
+        # 2) 扫描线：每 3 行压暗一次
+        scan = _retro_scanline_mask().convert("RGB")
+        out = ImageChops.multiply(out, scan)
+        # 3) 高斯噪点（均值 0 → effect_noise 中心 128，减去 128）
+        try:
+            noise = Image.effect_noise((W, H), _RETRO_NOISE_SIGMA).convert("RGB")
+            out = ImageChops.add(out, noise, 1, -128)
+        except Exception:
+            pass
+        # 4) 轻微色差：R 右移 1px，B 左移 1px
+        try:
+            r, g, b = out.split()
+            r = ImageChops.offset(r, 1, 0)
+            b = ImageChops.offset(b, -1, 0)
+            out = Image.merge("RGB", (r, g, b))
+        except Exception:
+            pass
+        # 5) 四角暗角
+        try:
+            black = Image.new("RGB", (W, H), (0, 0, 0))
+            out = Image.composite(black, out, _retro_vignette_mask())
+        except Exception:
+            pass
+        # 6) 轻微提对比
+        try:
+            out = ImageEnhance.Contrast(out).enhance(_RETRO_CONTRAST)
+        except Exception:
+            pass
+        return out
+    except Exception:
+        return img
+
+
+# ---------------------------------------------------------------------------
+# 底版叠加辅助
+# ---------------------------------------------------------------------------
+
+_OSD_WHITE = (230, 235, 230)
+
+
+def _osd(d: Any, xy: Any, text: str, font: Any, fill=_OSD_WHITE,
+         anchor: Optional[str] = None, stroke_width: int = 1,
+         stroke_fill: Any = (0, 0, 0)) -> None:
+    """带 1px 黑描边的 OSD 文字，压在噪点上仍可读。"""
+    d.text(xy, text, font=font, fill=fill, anchor=anchor,
+           stroke_width=stroke_width, stroke_fill=stroke_fill)
+
+
+def _truncate_px(d: Any, text: str, font: Any, max_w: int) -> str:
+    """按像素宽度截断（英文单词粒度粗切，尾部加 ...）。"""
+    text = text.replace("\n", " ").strip()
+    tw, _ = _text_size(d, text, font)
+    if tw <= max_w or not text:
+        return text
+    while text and _text_size(d, text + "...", font)[0] > max_w:
+        text = text[:-1]
+    return (text + "...").strip()
+
+
+# ---------------------------------------------------------------------------
 # 输出目录
 # ---------------------------------------------------------------------------
 
@@ -173,9 +342,48 @@ def _atomic_save(img: Any, out_dir: str, name: str) -> Optional[str]:
 # 01 Grafana 法医遥测面板（v2：客观双波形，无祈使句）
 # ---------------------------------------------------------------------------
 
+def _overlay_grafana_plate(img: Any, out_dir: str) -> Optional[str]:
+    """底版分支：CRT 面板底版 + 精确可读的图例/标题/读数叠加，最后统一劣化。"""
+    d = ImageDraw.Draw(img)
+    title_col = (230, 235, 230)
+    dim_col = (196, 203, 212)
+    grid_col = (150, 158, 166)
+    orange = (230, 150, 60)
+
+    # 图例：底版左上色块右侧
+    f_leg = _mono(11)
+    _osd(d, (100, 44), "upstream HTTP 200 rate", f_leg, fill=(120, 230, 130))
+    _osd(d, (100, 62), "cranial electro-shock events (240V)", f_leg, fill=orange)
+
+    # 大面板标题 + 右上角版本戳
+    _osd(d, (34, 14), "Node prod-cortex-04  \u00b7  Biological Compute Unit #04",
+         _mono(10), fill=title_col)
+    _osd(d, (872, 15), "grafana v9.4 / ops-readonly", _mono(9), fill=dim_col,
+         anchor="ra")
+
+    # 左下液位面板
+    _osd(d, (45, 330), "analgesia reservoir (morphine sulfate)", _mono(11),
+         fill=title_col)
+    chip = Image.new("RGBA", (134, 58), (0, 0, 0, 0))
+    cd = ImageDraw.Draw(chip)
+    cd.rectangle([0, 0, 133, 57], fill=(6, 8, 10, 150), outline=(92, 98, 106, 170))
+    img.paste(chip, (282, 408), chip)
+    _osd(d, (292, 412), "0.0%", _mono(21), fill=orange)
+    _osd(d, (292, 440), "analgesia line", _mono(8), fill=dim_col)
+    _osd(d, (292, 452), "NV-2025-09-004", _mono(8), fill=dim_col)
+
+    # 右下表格表头
+    _osd(d, (462, 331), "chamber     subject      dn_status", _mono(8),
+         fill=grid_col)
+    return _atomic_save(_retro_finish(img), out_dir, FILE_GRAFANA)
+
+
 def _draw_grafana(state: Any, out_dir: str) -> Optional[str]:
     if not _HAS_PIL:
         return None
+    plate = _plate("01_dashboard")
+    if plate is not None:
+        return _overlay_grafana_plate(plate, out_dir)
     rnd = random.Random(502)
     img = Image.new("RGB", (W, H), (10, 12, 16))
     d = ImageDraw.Draw(img)
@@ -258,9 +466,26 @@ def _draw_grafana(state: Any, out_dir: str) -> Optional[str]:
 # 02 机房培养舱摄像头（v2：夜视 + 仅客观读数）
 # ---------------------------------------------------------------------------
 
+def _overlay_camera_plate(img: Any, out_dir: str) -> Optional[str]:
+    """底版分支：IR 静帧 + 四角 OSD + 取景框。"""
+    d = ImageDraw.Draw(img)
+    f = _mono(15)
+    osd_col = (208, 216, 204)
+    _osd(d, (18, 14), "CAM 07-B7   IR   \u25cf REC", f, fill=osd_col)
+    _osd(d, (882, 14), "2026-10-26 02:58:12 UTC", f, fill=osd_col, anchor="ra")
+    _osd(d, (18, 552), "CHAMBER_04   38.6 C   HR 184 BPM   SpO2 --",
+         _mono(13), fill=osd_col)
+    _osd(d, (882, 552), "NV-OPS / slv-04", _mono(13), fill=osd_col, anchor="ra")
+    d.rectangle([8, 8, W - 9, H - 9], outline=(200, 200, 200), width=1)
+    return _atomic_save(_retro_finish(img), out_dir, FILE_CAMERA)
+
+
 def _draw_camera(state: Any, out_dir: str) -> Optional[str]:
     if not _HAS_PIL:
         return None
+    plate = _plate("02_rack_camera")
+    if plate is not None:
+        return _overlay_camera_plate(plate, out_dir)
     rnd = random.Random(4040)
     img = Image.new("RGB", (W, H), (6, 16, 8))
     d = ImageDraw.Draw(img)
@@ -332,9 +557,40 @@ def _draw_camera(state: Any, out_dir: str) -> Optional[str]:
 # 03 器官抵债改造协议（v2：法医表格 + 指纹铁证，无警告框）
 # ---------------------------------------------------------------------------
 
+def _overlay_consent_plate(img: Any, out_dir: str) -> Optional[str]:
+    """底版分支：扫描表单 + 页脚打字机归档行 + 红色斜盖章。"""
+    d = ImageDraw.Draw(img)
+    dark = (18, 14, 8)
+    gray = (52, 42, 26)
+    # 页眉归档分类行（灰）
+    d.text((60, 28), "NV-88/4  INTAKE CONSENT  \u2014  ARCHIVE COPY", font=_mono(10),
+           fill=(60, 50, 34))
+    # 页脚打字机三行（黑）
+    d.text((56, 486), "CHAMBER_04    SUBJECT_04    BADGE 4-0-2-4", font=_mono(12),
+           fill=dark)
+    d.text((56, 504), "DNR NV-DNR-04-2025-08-30 ON FILE \u2014 ENFORCEMENT SUSPENDED 2025-09",
+           font=_mono(9), fill=dark)
+    d.text((56, 518), "enrollment key fp SHA256:VJolS/lSXBaJBUUIGozauXDRCcy7o0AO9kbr/Hh774E",
+           font=_mono(9), fill=(26, 20, 12))
+    # 右下角红色斜盖章（半透明）
+    try:
+        stamp = Image.new("RGBA", (170, 56), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(stamp)
+        sd.text((14, 14), "FILE 04-C", font=_mono(17), fill=(146, 38, 34, 186))
+        sd.rectangle([2, 2, 167, 53], outline=(146, 38, 34, 150), width=2)
+        stamp = stamp.rotate(-8, resample=Image.BILINEAR, expand=True)
+        img.paste(stamp, (566, 470), stamp)
+    except Exception:
+        d.text((700, 470), "FILE 04-C", font=_mono(18), fill=(150, 40, 40))
+    return _atomic_save(_retro_finish(img), out_dir, FILE_CONSENT)
+
+
 def _draw_consent(state: Any, out_dir: str) -> Optional[str]:
     if not _HAS_PIL:
         return None
+    plate = _plate("03_consent")
+    if plate is not None:
+        return _overlay_consent_plate(plate, out_dir)
     rnd = random.Random(84)
     img = Image.new("RGB", (W, H), (225, 216, 188))
     d = ImageDraw.Draw(img)
@@ -432,9 +688,35 @@ def _box(d: Any, x0: int, y0: int, x1: int, y1: int, title: str, lines: List[str
         yy += 18
 
 
+def _overlay_mirror_plate(img: Any, state: Any, out_dir: str) -> Optional[str]:
+    """底版分支：观察窗底版 + 半透明 HUD 面板（recent commands）。"""
+    # 半透明黑底面板
+    px0, py0, px1, py1 = 30, 360, 560, 568
+    panel = Image.new("RGBA", (px1 - px0, py1 - py0), (0, 0, 0, 118))
+    img.paste(panel, (px0, py0), panel)
+    d = ImageDraw.Draw(img)
+    d.rectangle([px0, py0, px1, py1], outline=(96, 104, 112), width=1)
+    _osd(d, (px0 + 14, py0 + 8), "stdin/stdout \u2014 decoded (12 tokens/s)",
+         _mono(12), fill=(196, 232, 228))
+    f_cmd = _mono(12)
+    y = py0 + 36
+    for c in _mirror_lines(state, 6):
+        _osd(d, (px0 + 14, y), _truncate_px(d, "$ " + c, f_cmd, 500), f_cmd,
+             fill=(205, 226, 205))
+        y += 27
+        if y > py1 - 34:
+            break
+    _osd(d, (px1 - 12, py1 - 14), "node prod-cortex-04 \u00b7 rack B7 \u00b7 subject_04",
+         _mono(8), fill=(150, 158, 166), anchor="ra")
+    return _atomic_save(_retro_finish(img), out_dir, FILE_MIRROR)
+
+
 def _draw_mirror(state: Any, out_dir: str) -> Optional[str]:
     if not _HAS_PIL:
         return None
+    plate = _plate("04_mirror")
+    if plate is not None:
+        return _overlay_mirror_plate(plate, state, out_dir)
     img = Image.new("RGB", (W, H), (13, 15, 19))
     d = ImageDraw.Draw(img)
 
