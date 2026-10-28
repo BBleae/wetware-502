@@ -330,12 +330,15 @@ for PORT in 2222; do
     nft add rule inet filter input tcp dport "$PORT" accept
   dedupe_rules "inet filter input" "tcp dport $PORT accept"
 done
-while nft -a list chain inet filter input 2>/dev/null | grep -qE "tcp dport $ENTRY_BASE_PORT accept"; do
+# :2223 is loopback-only; drop any stale LAN hole an older guard may have left.
+# Hardcode the port and use no log(): this runs inside the `set -u` guard body
+# where the outer script's $ENTRY_BASE_PORT and log() do not exist (the rest of
+# this body is hardcoded for the same reason).
+while nft -a list chain inet filter input 2>/dev/null | grep -qE 'tcp dport 2223 accept'; do
   handle=$(nft -a list chain inet filter input 2>/dev/null | \
-    awk "/tcp dport $ENTRY_BASE_PORT accept/ {print \$NF; exit}")
+    awk '/tcp dport 2223 accept/ {print $NF; exit}')
   [ -n "$handle" ] || break
   nft delete rule inet filter input handle "$handle" 2>/dev/null || break
-  log "closed stale LAN hole for baseline port :$ENTRY_BASE_PORT"
 done
 
 # 3. forward between the campaign veths (each pair runs in both directions).

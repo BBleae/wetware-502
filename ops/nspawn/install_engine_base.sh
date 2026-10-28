@@ -1164,7 +1164,7 @@ def read_packages(root):
 # ---------------------------------------------------------------------------
 # sessions
 # ---------------------------------------------------------------------------
-def build_sessions(role="core", now=None, has_gate=False):
+def build_sessions(role="core", now=None, has_gate=False, host_boot=None):
     # Per-role seed: the three nodes share a maintenance *calendar* (one facility
     # schedule) but never a byte-identical history -- durations, pids, ports and
     # times-of-day differ, so `last` on each node reads as its own box, not a
@@ -1212,6 +1212,17 @@ def build_sessions(role="core", now=None, has_gate=False):
     if now:
         recent_logout = int(now) - rng.rand(1500, 2400)   # ~25-40 min ago, closed
         recent_login = recent_logout - (48 * 60 + 31)
+        # ...but never before the live boot: on a low-uptime host (a VM whose
+        # history pass runs minutes after boot) the unclamped login lands before
+        # the boot record and `last` then shows no login since the reboot -- the
+        # very tell this removes.  Clamp the whole session to sit after boot.
+        if host_boot:
+            floor = int(host_boot) + 120
+            if recent_login < floor:
+                recent_login = floor
+                recent_logout = min(int(now) - 60, recent_login + rng.rand(300, 1500))
+                if recent_logout <= recent_login:
+                    recent_logout = recent_login + 60
     else:
         recent_login = ts(2026, 10, 26, 7, 52, 31)
         recent_logout = ts(2026, 10, 26, 8, 41, 7)
@@ -2082,7 +2093,7 @@ def main():
     users = read_passwd(root)
     groups = read_group(root)
     pkgs = read_packages(root)
-    sessions = build_sessions(role, now, bool(gate_fp))
+    sessions = build_sessions(role, now, bool(gate_fp), host_boot)
     # every wtmp/lastlog record must name an account this machine really has:
     # `last` showing a user that /etc/passwd does not know is a build tell.
     sessions = [s for s in sessions if s["user"] in users]
