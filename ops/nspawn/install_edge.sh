@@ -739,6 +739,12 @@ PYEOF
   touch -d '2026-10-26 03:12:00 UTC' "$R/var/lib/ops/sla_countdown.txt" 2>/dev/null || true
   touch -d '2026-10-26 03:06:00 UTC' "$R/var/lib/ops/notes.txt" 2>/dev/null || true
   chmod 0755 "$R/opt/vesalius" "$R/opt/vesalius/handover" 2>/dev/null || true
+  # Lin's home has been frozen since intake: writing his files above leaves the
+  # directories with a deploy-time mtime, which reads as "the dead man's home was
+  # modified just now".  Stamp the dirs last so they match the files inside them
+  # (ops never touches /home/lin; nothing re-bumps it after this pass).
+  touch -d '2025-08-30 17:59:00 UTC' "$R/home/lin/.ssh" 2>/dev/null || true
+  touch -d '2025-08-30 18:07:00 UTC' "$R/home/lin" 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------------------
